@@ -2,7 +2,7 @@
   "name": "modulate",
   "description": "manifest.json description",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "license": "GPL-3.0-only",
   "scripts": {
@@ -16,6 +16,8 @@
     "postinstall": "wxt prepare"
   },
   "dependencies": {
+    "@soundtouchjs/audio-worklet": "^2.0.3",
+    "lucide-react": "^1.16.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

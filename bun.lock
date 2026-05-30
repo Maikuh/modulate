@@ -5,6 +5,8 @@
     "": {
       "name": "wxt-react-starter",
       "dependencies": {
+        "@soundtouchjs/audio-worklet": "^2.0.3",
+        "lucide-react": "^1.16.0",
         "react": "^19.2.4",
         "react-dom": "^19.2.4",
       },
@@ -149,6 +151,14 @@
     "@rolldown/binding-win32-x64-msvc": ["@rolldown/binding-win32-x64-msvc@1.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-v7qRI7gXLRINcOGXt+7YmAZ6iFuyZVMIoXAxhd8oP+DR9dLfL9GfNIx7PLMxmhZdvq8waUJBQiWN9EKNy+TRBQ=="],
 
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.1", "", {}, "sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw=="],
+
+    "@soundtouchjs/audio-worklet": ["@soundtouchjs/audio-worklet@2.0.3", "", { "dependencies": { "@soundtouchjs/core": "2.0.3", "@soundtouchjs/interpolation-strategy-lanczos": "2.0.3", "@soundtouchjs/worklet-base": "2.0.3" } }, "sha512-lx85tUfHVp+uFyrsMm7EXQb9W/8Icectt/b8rE23l1W/wcHJCd0/mtguen+bRJg7sVE/KbXSWtQr4IZBHzkPfQ=="],
+
+    "@soundtouchjs/core": ["@soundtouchjs/core@2.0.3", "", { "dependencies": { "@soundtouchjs/interpolation-strategy-lanczos": "2.0.3" } }, "sha512-dNlV/HP7HERm8/FCYLiWivlb3V9rrkFEUMPhazznkPd8EhsRDhewfd3r3QCW2YopOgZygukkhD+vjnTMMpQvVw=="],
+
+    "@soundtouchjs/interpolation-strategy-lanczos": ["@soundtouchjs/interpolation-strategy-lanczos@2.0.3", "", {}, "sha512-o20uWwvlCiQ2gB6nE2i4Tl9KsAHOoZoo+0rrBKbervg7cb1SDWgmBOdoL3bsL2Dvm8d6xeE6ufIf6caYCsYWhw=="],
+
+    "@soundtouchjs/worklet-base": ["@soundtouchjs/worklet-base@2.0.3", "", { "dependencies": { "@soundtouchjs/core": "2.0.3" } }, "sha512-nnS7l1XuvmesbZP1GNkT5uZL1q6PcP2gPsqC/yH+7oit6s5mdfaBvp3hzSEaP1rsRca6vxVoOV4GnO3wWiVfEA=="],
 
     "@tybys/wasm-util": ["@tybys/wasm-util@0.10.2", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg=="],
 
@@ -501,6 +511,8 @@
     "lodash.once": ["lodash.once@4.1.1", "", {}, "sha512-Sb487aTOCr9drQVL8pIxOzVhafOjZN9UU54hiN8PU3uAiSV7lx1yYNpbNmex2PK6dSJoNTSJUUswT651yww3Mg=="],
 
     "log-update": ["log-update@6.1.0", "", { "dependencies": { "ansi-escapes": "^7.0.0", "cli-cursor": "^5.0.0", "slice-ansi": "^7.1.0", "strip-ansi": "^7.1.0", "wrap-ansi": "^9.0.0" } }, "sha512-9ie8ItPR6tjY5uYJh8K/Zrv/RMZ5VOlOWvtZdEHYSTFKZfIBPQa9tOAEeAWhd+AnIneLJ22w5fjOYtoutpWq5w=="],
+
+    "lucide-react": ["lucide-react@1.16.0", "", { "peerDependencies": { "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-dYwyPzb4MEKpGUmNYk3WKWPnMrHs3FKM+q94kAnJrcDIqqn1hq2xY8scaS2ovsOCM5D51ey2gaRG3PBb1vgoYQ=="],
 
     "magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 
