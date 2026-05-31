@@ -39,6 +39,12 @@ export default defineUnlistedScript(() => {
   }
 
   async function apply(msg: ApplyMessage): Promise<void> {
+    // Lazy capture: leave the <video> untouched until a real (non-zero) transpose
+    // is asked for. `createMediaElementSource` is irreversible and reroutes ALL
+    // audio through Web Audio — capturing for a no-op 0 needlessly exposes normal
+    // playback to any graph/worklet fault. Nothing to do here, so bail.
+    if (msg.semitones === 0 && !audioEngine.hasGraph) return;
+
     const el = await waitForVideo();
     if (!el) return;
     await audioEngine.ensureGraph(el, msg.processorUrl);
@@ -60,5 +66,12 @@ export default defineUnlistedScript(() => {
     }
 
     void apply(msg).catch((err) => console.error('[modulate] audio apply failed', err));
+  });
+
+  // Close the AudioContext on real unload only. Skipping bfcache (`persisted`)
+  // keeps the frozen graph intact for restore — and avoids re-capturing the same
+  // <video> on the way back, which `createMediaElementSource` forbids.
+  window.addEventListener('pagehide', (event) => {
+    if (!event.persisted) void audioEngine.dispose();
   });
 });
