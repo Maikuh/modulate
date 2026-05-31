@@ -13,10 +13,34 @@
   border-bottom: 1px solid rgba(128, 128, 128, 0.25);
 }
 
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .header h1 {
   margin: 0;
   font-size: 1.25rem;
   letter-spacing: 0.5px;
+}
+
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background-color: transparent;
+  color: #888;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.icon-button:hover {
+  color: inherit;
+  border-color: rgba(128, 128, 128, 0.4);
 }
 
 .muted {
@@ -47,14 +71,58 @@
   cursor: default;
 }
 
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.control.dim {
+  opacity: 0.55;
+}
+
 .stepper {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.stepper.dim {
-  opacity: 0.55;
+.slider {
+  width: 100%;
+  height: 6px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 3px;
+  background-color: rgba(128, 128, 128, 0.25);
+  cursor: pointer;
+}
+
+.slider:disabled {
+  cursor: default;
+}
+
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  background-color: #646cff;
+  transition: transform 0.1s;
+}
+
+.slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  background-color: #646cff;
+}
+
+.slider:not(:disabled)::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
 }
 
 .stepper button {
@@ -94,6 +162,30 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #888;
+}
+
+.reset-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 4px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background-color: transparent;
+  color: #888;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.reset-control:not(:disabled):hover {
+  color: inherit;
+  border-color: #646cff;
+}
+
+.reset-control:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .reset {

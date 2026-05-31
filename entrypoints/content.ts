@@ -1,13 +1,20 @@
-import type { ApplyMessage, PopupMessage, PlayerState } from '@/lib/messaging';
+import { storage } from 'wxt/utils/storage';
+import type {
+  ApplyMessage,
+  BadgeMessage,
+  PopupMessage,
+  PlayerState,
+} from '@/lib/messaging';
 import { getVideoId } from '@/lib/youtube';
 import {
   globalEnabled,
-  getVideoSetting,
+  audioQuality,
+  getRawVideoSetting,
   setVideoSetting,
-  effectiveSemitones,
+  resolveSetting,
+  clampSemitones,
+  clampTempo,
   DEFAULT_VIDEO_SETTING,
-  MIN_SEMITONES,
-  MAX_SEMITONES,
 } from '@/lib/storage';
 
 export default defineContentScript({
@@ -39,24 +46,32 @@ export default defineContentScript({
     async function getState(): Promise<PlayerState> {
       const videoId = getVideoId(location.href);
       const global = await globalEnabled.getValue();
-      if (!videoId) {
-        return { videoId: null, globalEnabled: global, enabled: true, semitones: 0 };
-      }
-      const setting = await getVideoSetting(videoId);
-      return {
+      const base: PlayerState = {
         videoId,
         globalEnabled: global,
-        enabled: setting.enabled,
-        semitones: setting.semitones,
+        enabled: true,
+        semitones: 0,
+        tempo: 1,
+      };
+      if (!videoId) return base;
+
+      const setting = await getRawVideoSetting(videoId);
+      return {
+        ...base,
+        enabled: setting?.enabled ?? DEFAULT_VIDEO_SETTING.enabled,
+        semitones: setting?.semitones ?? 0,
+        tempo: setting?.tempo ?? 1,
       };
     }
 
-    /** Resolve the effective semitones and forward them to the main-world engine. */
+    /** Resolve the effective pitch/tempo + quality and forward them to the engine. */
     async function apply(): Promise<void> {
       if (!ctx.isValid) return;
       const videoId = getVideoId(location.href);
       const global = await globalEnabled.getValue();
-      const setting = videoId ? await getVideoSetting(videoId) : DEFAULT_VIDEO_SETTING;
+      const quality = await audioQuality.getValue();
+      const video = videoId ? await getRawVideoSetting(videoId) : undefined;
+      const resolved = resolveSetting(global, video);
 
       await injected; // Ensure the page-world listener is registered.
       if (!ctx.isValid) return;
@@ -65,11 +80,24 @@ export default defineContentScript({
         source: 'modulate',
         type: 'apply',
         processorUrl,
-        semitones: effectiveSemitones(global, setting),
+        semitones: resolved.semitones,
+        tempo: resolved.tempo,
+        overlapMs: quality.overlapMs,
+        quickSeek: quality.quickSeek,
+        sequenceMs: quality.sequenceMs,
+        seekWindowMs: quality.seekWindowMs,
       };
       // JSON string payload: primitives cross the content/page membrane without
       // `cloneInto`; a raw object would arrive as `null` in the page realm.
       window.postMessage(JSON.stringify(msg), '*');
+
+      // Tell the background to render the toolbar badge for this tab.
+      const badge: BadgeMessage = {
+        type: 'MODULATE_BADGE',
+        semitones: resolved.semitones,
+        tempo: resolved.tempo,
+      };
+      browser.runtime.sendMessage(badge).catch(() => {});
     }
 
     async function handle(msg: PopupMessage): Promise<PlayerState> {
@@ -78,8 +106,24 @@ export default defineContentScript({
       switch (msg.type) {
         case 'SET_SEMITONES':
           if (videoId) {
-            const clamped = Math.max(MIN_SEMITONES, Math.min(MAX_SEMITONES, msg.semitones));
-            await setVideoSetting(videoId, { semitones: clamped });
+            await setVideoSetting(videoId, { semitones: clampSemitones(msg.semitones) });
+          }
+          break;
+        case 'NUDGE_SEMITONES':
+          if (videoId) {
+            const current = await getRawVideoSetting(videoId);
+            const from = current?.semitones ?? 0;
+            await setVideoSetting(videoId, { semitones: clampSemitones(from + msg.delta) });
+          }
+          break;
+        case 'SET_TEMPO':
+          if (videoId) await setVideoSetting(videoId, { tempo: clampTempo(msg.tempo) });
+          break;
+        case 'NUDGE_TEMPO':
+          if (videoId) {
+            const current = await getRawVideoSetting(videoId);
+            const from = current?.tempo ?? 1;
+            await setVideoSetting(videoId, { tempo: clampTempo(from + msg.delta) });
           }
           break;
         case 'SET_VIDEO_ENABLED':
@@ -123,6 +167,15 @@ export default defineContentScript({
         void apply();
       }
     }, 1000);
+
+    // Re-apply when settings change elsewhere (the options page edits storage
+    // directly), so the active tab reflects edits live.
+    const unwatchers = [
+      storage.watch('local:videoSettings', () => void apply()),
+      storage.watch('local:audioQuality', () => void apply()),
+      storage.watch('local:globalEnabled', () => void apply()),
+    ];
+    ctx.onInvalidated(() => unwatchers.forEach((off) => off()));
 
     void apply();
   },

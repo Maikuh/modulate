@@ -39,15 +39,23 @@ export default defineUnlistedScript(() => {
   }
 
   async function apply(msg: ApplyMessage): Promise<void> {
-    // Lazy capture: leave the <video> untouched until a real (non-zero) transpose
-    // is asked for. `createMediaElementSource` is irreversible and reroutes ALL
-    // audio through Web Audio — capturing for a no-op 0 needlessly exposes normal
+    // Lazy capture: leave the <video> untouched until a real change (transpose or
+    // tempo) is asked for. `createMediaElementSource` is irreversible and reroutes
+    // ALL audio through Web Audio — capturing for a no-op needlessly exposes normal
     // playback to any graph/worklet fault. Nothing to do here, so bail.
-    if (msg.semitones === 0 && !audioEngine.hasGraph) return;
+    if (msg.semitones === 0 && msg.tempo === 1 && !audioEngine.hasGraph) return;
 
     const el = await waitForVideo();
     if (!el) return;
+    // Set quality before the graph is built so `ensureGraph` constructs with it.
+    audioEngine.applyQuality({
+      overlapMs: msg.overlapMs,
+      quickSeek: msg.quickSeek,
+      sequenceMs: msg.sequenceMs,
+      seekWindowMs: msg.seekWindowMs,
+    });
     await audioEngine.ensureGraph(el, msg.processorUrl);
+    audioEngine.applyTempo(msg.tempo);
     audioEngine.applySemitones(msg.semitones);
     // The originating popup click is a user gesture, so resuming here succeeds.
     await audioEngine.resume();

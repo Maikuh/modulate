@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Minus, Plus } from 'lucide-react';
+import { Minus, Plus, RotateCcw, Settings } from 'lucide-react';
 import type { PlayerState, PopupMessage } from '@/lib/messaging';
-import { MIN_SEMITONES, MAX_SEMITONES } from '@/lib/storage';
+import {
+  MIN_SEMITONES,
+  MAX_SEMITONES,
+  MIN_TEMPO,
+  MAX_TEMPO,
+  TEMPO_STEP,
+} from '@/lib/storage';
 import './App.css';
 
 /** Send a message to the content script in the active tab; null if none responds. */
@@ -48,12 +54,23 @@ function App() {
   const global = state?.globalEnabled ?? true;
   const videoEnabled = state?.enabled ?? true;
   const semitones = state?.semitones ?? 0;
+  const tempo = state?.tempo ?? 1;
   const active = onYouTube && global && videoEnabled;
 
   return (
     <main className="popup">
       <header className="header">
-        <h1>Modulate</h1>
+        <div className="title-row">
+          <h1>Modulate</h1>
+          <button
+            className="icon-button"
+            aria-label="Open settings"
+            title="Settings"
+            onClick={() => browser.runtime.openOptionsPage()}
+          >
+            <Settings size={18} aria-hidden />
+          </button>
+        </div>
         <label className="switch" title="Master switch for all videos">
           <input
             type="checkbox"
@@ -82,30 +99,99 @@ function App() {
             <span>Enabled for this video</span>
           </label>
 
-          <div className={`stepper ${active ? '' : 'dim'}`}>
-            <button
-              aria-label="Down a semitone"
-              disabled={!active || semitones <= MIN_SEMITONES}
-              onClick={() => dispatch({ type: 'SET_SEMITONES', semitones: semitones - 1 })}
-            >
-              <Minus size={22} strokeWidth={2.5} aria-hidden />
-            </button>
-            <div className="readout">
-              <span className="value">{formatSemitones(semitones)}</span>
-              <span className="unit">semitones</span>
+          <div className={`control ${active ? '' : 'dim'}`}>
+            <div className="stepper">
+              <button
+                aria-label="Down a semitone"
+                disabled={!active || semitones <= MIN_SEMITONES}
+                onClick={() => dispatch({ type: 'SET_SEMITONES', semitones: semitones - 1 })}
+              >
+                <Minus size={22} strokeWidth={2.5} aria-hidden />
+              </button>
+              <div className="readout">
+                <span className="value">{formatSemitones(semitones)}</span>
+                <span className="unit">semitones</span>
+                <button
+                  className="reset-control"
+                  aria-label="Reset pitch"
+                  title="Reset pitch"
+                  disabled={!active || semitones === 0}
+                  onClick={() => dispatch({ type: 'SET_SEMITONES', semitones: 0 })}
+                >
+                  <RotateCcw size={13} aria-hidden />
+                </button>
+              </div>
+              <button
+                aria-label="Up a semitone"
+                disabled={!active || semitones >= MAX_SEMITONES}
+                onClick={() => dispatch({ type: 'SET_SEMITONES', semitones: semitones + 1 })}
+              >
+                <Plus size={22} strokeWidth={2.5} aria-hidden />
+              </button>
             </div>
-            <button
-              aria-label="Up a semitone"
-              disabled={!active || semitones >= MAX_SEMITONES}
-              onClick={() => dispatch({ type: 'SET_SEMITONES', semitones: semitones + 1 })}
-            >
-              <Plus size={22} strokeWidth={2.5} aria-hidden />
-            </button>
+            <input
+              type="range"
+              className="slider"
+              aria-label="Pitch in semitones"
+              min={MIN_SEMITONES}
+              max={MAX_SEMITONES}
+              step={1}
+              value={semitones}
+              disabled={!active}
+              onChange={(e) =>
+                dispatch({ type: 'SET_SEMITONES', semitones: Number(e.target.value) })
+              }
+            />
+          </div>
+
+          <div className={`control ${active ? '' : 'dim'}`}>
+            <div className="stepper">
+              <button
+                aria-label="Slower"
+                disabled={!active || tempo <= MIN_TEMPO}
+                onClick={() => dispatch({ type: 'SET_TEMPO', tempo: tempo - TEMPO_STEP })}
+              >
+                <Minus size={22} strokeWidth={2.5} aria-hidden />
+              </button>
+              <div className="readout">
+                <span className="value">{tempo.toFixed(2)}×</span>
+                <span className="unit">speed</span>
+                <button
+                  className="reset-control"
+                  aria-label="Reset speed"
+                  title="Reset speed"
+                  disabled={!active || tempo === 1}
+                  onClick={() => dispatch({ type: 'SET_TEMPO', tempo: 1 })}
+                >
+                  <RotateCcw size={13} aria-hidden />
+                </button>
+              </div>
+              <button
+                aria-label="Faster"
+                disabled={!active || tempo >= MAX_TEMPO}
+                onClick={() => dispatch({ type: 'SET_TEMPO', tempo: tempo + TEMPO_STEP })}
+              >
+                <Plus size={22} strokeWidth={2.5} aria-hidden />
+              </button>
+            </div>
+            <input
+              type="range"
+              className="slider"
+              aria-label="Playback speed"
+              min={MIN_TEMPO}
+              max={MAX_TEMPO}
+              step={TEMPO_STEP}
+              value={tempo}
+              disabled={!active}
+              onChange={(e) =>
+                dispatch({ type: 'SET_TEMPO', tempo: Number(e.target.value) })
+              }
+            />
           </div>
 
           <button
             className="reset"
-            disabled={!active || semitones === 0}
+            disabled={!active || (semitones === 0 && tempo === 1)}
             onClick={() => dispatch({ type: 'RESET' })}
           >
             Reset

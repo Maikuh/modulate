@@ -2,17 +2,33 @@
  * Message protocol for the extension.
  *
  * Two hops: the popup is a thin remote that messages the content script
- * (`PopupMessage`), and the content script forwards the resolved semitone value
- * to the main-world audio engine (`ApplyMessage`). The content script owns
+ * (`PopupMessage`), and the content script forwards the resolved pitch/tempo
+ * values to the main-world audio engine (`ApplyMessage`). The content script owns
  * storage; the main-world script owns the Web Audio graph (see `injected.ts`).
+ *
+ * A third actor, the background script, drives keyboard `commands` (sending
+ * `PopupMessage`s to the active tab) and renders the toolbar badge (receiving a
+ * `BackgroundMessage` from the content script).
  */
 
 export type PopupMessage =
   | { type: 'GET_STATE' }
   | { type: 'SET_SEMITONES'; semitones: number }
+  | { type: 'NUDGE_SEMITONES'; delta: number }
+  | { type: 'SET_TEMPO'; tempo: number }
+  | { type: 'NUDGE_TEMPO'; delta: number }
   | { type: 'SET_VIDEO_ENABLED'; enabled: boolean }
   | { type: 'SET_GLOBAL_ENABLED'; enabled: boolean }
   | { type: 'RESET' };
+
+/** Sent from the content script to the background script to drive the toolbar badge. */
+export interface BadgeMessage {
+  type: 'MODULATE_BADGE';
+  /** Effective semitones currently applied in the sending tab. */
+  semitones: number;
+  /** Effective tempo currently applied in the sending tab. */
+  tempo: number;
+}
 
 /**
  * Command posted from the content script to the main-world `injected` script
@@ -25,6 +41,13 @@ export interface ApplyMessage {
   processorUrl: string;
   /** Effective semitones to apply, already resolved against the toggles. */
   semitones: number;
+  /** Effective playback rate to apply (1 = original), pitch held constant. */
+  tempo: number;
+  /** WSOLA time-stretch tuning for the worklet. */
+  overlapMs: number;
+  quickSeek: boolean;
+  sequenceMs: number;
+  seekWindowMs: number;
 }
 
 /** Snapshot returned to the popup so it can render the current state. */
@@ -34,4 +57,5 @@ export interface PlayerState {
   globalEnabled: boolean;
   enabled: boolean;
   semitones: number;
+  tempo: number;
 }

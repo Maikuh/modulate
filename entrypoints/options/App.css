@@ -1,0 +1,162 @@
+.options {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.options header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: 0.5px;
+}
+
+.options h2 {
+  margin: 0 0 12px;
+  font-size: 1.05rem;
+}
+
+.muted {
+  color: #888;
+  margin: 0;
+}
+
+.hint {
+  font-size: 0.85rem;
+  margin-bottom: 14px;
+}
+
+section {
+  padding-bottom: 24px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+section:last-child {
+  border-bottom: none;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.92rem;
+  user-select: none;
+}
+
+.switch input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.field label {
+  font-size: 0.85rem;
+}
+
+.field input[type='number'] {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background-color: rgba(128, 128, 128, 0.08);
+  color: inherit;
+}
+
+.field input[type='range'] {
+  accent-color: #646cff;
+}
+
+.field-row {
+  display: flex;
+  gap: 16px;
+}
+
+.field-row .field {
+  flex: 1;
+}
+
+.secondary {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background-color: transparent;
+  color: inherit;
+  font-size: 0.85rem;
+  transition: border-color 0.2s;
+}
+
+.secondary:not(:disabled):hover {
+  border-color: #646cff;
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: rgba(128, 128, 128, 0.08);
+  font-size: 0.88rem;
+}
+
+.row-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  text-decoration: none;
+}
+
+a.row-id:hover {
+  color: #646cff;
+  text-decoration: underline;
+}
+
+.row-meta {
+  color: #888;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #646cff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.link.danger {
+  color: #e5534b;
+}
