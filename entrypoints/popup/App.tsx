@@ -8,6 +8,7 @@ import {
   MAX_TEMPO,
   TEMPO_STEP,
 } from '@/lib/storage';
+import { formatSemitones } from '@/lib/format';
 import './App.css';
 
 /** Send a message to the content script in the active tab; null if none responds. */
@@ -20,11 +21,6 @@ async function send(msg: PopupMessage): Promise<PlayerState | null> {
     // No content script in this tab (not a YouTube page).
     return null;
   }
-}
-
-function formatSemitones(n: number): string {
-  if (n === 0) return '0';
-  return `${n > 0 ? '+' : ''}${n}`;
 }
 
 function App() {

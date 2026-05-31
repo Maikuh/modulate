@@ -68,9 +68,12 @@ export default defineContentScript({
     async function apply(): Promise<void> {
       if (!ctx.isValid) return;
       const videoId = getVideoId(location.href);
-      const global = await globalEnabled.getValue();
-      const quality = await audioQuality.getValue();
-      const video = videoId ? await getRawVideoSetting(videoId) : undefined;
+      // Independent reads — fetch them concurrently rather than serially.
+      const [global, quality, video] = await Promise.all([
+        globalEnabled.getValue(),
+        audioQuality.getValue(),
+        videoId ? getRawVideoSetting(videoId) : Promise.resolve(undefined),
+      ]);
       const resolved = resolveSetting(global, video);
 
       await injected; // Ensure the page-world listener is registered.

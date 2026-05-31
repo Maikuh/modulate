@@ -1,15 +1,7 @@
 import { SoundTouchNode } from '@soundtouchjs/audio-worklet';
-// Type-only import: erased at build so the storage module (which touches
-// extension APIs) is never pulled into the MAIN-world injected bundle.
-import type { AudioQuality } from '@/lib/storage';
-
-/** Local copy of the quality defaults; kept in sync with `storage.ts`. */
-const DEFAULT_AUDIO_QUALITY: AudioQuality = {
-  overlapMs: 12,
-  quickSeek: false,
-  sequenceMs: 0,
-  seekWindowMs: 0,
-};
+// Side-effect-free module — safe to pull the value into the MAIN-world bundle,
+// unlike `storage.ts` which touches extension APIs unavailable in the page realm.
+import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality';
 
 /**
  * Owns the Web Audio graph that pitch-shifts and time-stretches a single media

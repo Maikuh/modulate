@@ -9,12 +9,8 @@ import {
   removeVideoSetting,
   clearVideoSettings,
 } from '@/lib/storage';
+import { formatSemitones } from '@/lib/format';
 import './App.css';
-
-function formatSemitones(n: number): string {
-  if (n === 0) return '0';
-  return `${n > 0 ? '+' : ''}${n}`;
-}
 
 function App() {
   const [global, setGlobal] = useState(true);

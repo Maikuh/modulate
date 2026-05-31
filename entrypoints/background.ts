@@ -1,5 +1,6 @@
 import type { BadgeMessage, PopupMessage } from '@/lib/messaging';
 import { TEMPO_STEP } from '@/lib/storage';
+import { formatSemitones } from '@/lib/format';
 
 /** Keyboard `commands` → the `PopupMessage` to send the active tab's content script. */
 const COMMAND_MESSAGES: Record<string, PopupMessage> = {
@@ -13,11 +14,6 @@ export default defineBackground(() => {
   // MV3 Chrome exposes `browser.action`; MV2 Firefox exposes `browserAction`.
   const action = browser.action ?? browser.browserAction;
   const ACCENT = '#646cff';
-
-  function format(n: number): string {
-    if (n === 0) return '0';
-    return `${n > 0 ? '+' : ''}${n}`;
-  }
 
   // Keyboard shortcuts: forward to the active tab's content script. Errors mean
   // the tab has no content script (not YouTube) — ignore.
@@ -41,7 +37,7 @@ export default defineBackground(() => {
 
     const text =
       message.semitones !== 0
-        ? format(message.semitones)
+        ? formatSemitones(message.semitones)
         : message.tempo !== 1
           ? '♪'
           : '';

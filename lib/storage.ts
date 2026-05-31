@@ -1,4 +1,8 @@
 import { storage } from 'wxt/utils/storage';
+import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality';
+
+// Re-export so existing `@/lib/storage` consumers keep working.
+export { DEFAULT_AUDIO_QUALITY, type AudioQuality };
 
 /** Persisted transpose settings for a single video. */
 export interface VideoSetting {
@@ -35,22 +39,6 @@ export function clampTempo(n: number): number {
   const snapped = Math.round(n / TEMPO_STEP) * TEMPO_STEP;
   return Math.max(MIN_TEMPO, Math.min(MAX_TEMPO, Number(snapped.toFixed(2))));
 }
-
-/** WSOLA time-stretch tuning, applied to the SoundTouch worklet. `0` = auto-calc. */
-export interface AudioQuality {
-  overlapMs: number;
-  quickSeek: boolean;
-  sequenceMs: number;
-  seekWindowMs: number;
-}
-
-/** Defaults mirror the values the audio engine used to hardcode. */
-export const DEFAULT_AUDIO_QUALITY: AudioQuality = {
-  overlapMs: 12,
-  quickSeek: false,
-  sequenceMs: 0,
-  seekWindowMs: 0,
-};
 
 /** Global master switch. When off, every video plays untransposed. */
 export const globalEnabled = storage.defineItem<boolean>('local:globalEnabled', {
