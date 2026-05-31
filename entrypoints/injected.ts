@@ -38,12 +38,48 @@ export default defineUnlistedScript(() => {
     });
   }
 
+  // Latest apply held back while we wait for a user gesture (see below).
+  let pending: ApplyMessage | null = null;
+  let gestureHooked = false;
+
+  /** Retry the pending apply once the page sees its first gesture. */
+  function hookGesture(): void {
+    if (gestureHooked) return;
+    gestureHooked = true;
+    const retry = () => {
+      gestureHooked = false;
+      // Drop both listeners — the first gesture fires one; the sibling would
+      // otherwise linger (and re-arming on a later defer would stack them).
+      window.removeEventListener('pointerdown', retry, true);
+      window.removeEventListener('keydown', retry, true);
+      const msg = pending;
+      pending = null;
+      if (msg) void apply(msg).catch((err) => console.error('[modulate] audio apply failed', err));
+    };
+    window.addEventListener('pointerdown', retry, { capture: true });
+    window.addEventListener('keydown', retry, { capture: true });
+  }
+
   async function apply(msg: ApplyMessage): Promise<void> {
     // Lazy capture: leave the <video> untouched until a real change (transpose or
     // tempo) is asked for. `createMediaElementSource` is irreversible and reroutes
     // ALL audio through Web Audio — capturing for a no-op needlessly exposes normal
     // playback to any graph/worklet fault. Nothing to do here, so bail.
     if (msg.semitones === 0 && msg.tempo === 1 && !audioEngine.hasGraph) return;
+
+    // Defer the FIRST graph build until the page has user activation. Building
+    // captures the element (irreversibly) and routes its audio through a context
+    // that starts `suspended`; without activation `resume()` can't run, so the
+    // captured element would play silently. This bites auto-applies — page load,
+    // SPA nav, options-page edits — which carry no gesture, unlike a popup click.
+    // When the activation API is unavailable (older Firefox) we can't tell, so we
+    // fall through and build as before. Once a graph exists, re-applies are cheap.
+    const ua = navigator.userActivation;
+    if (!audioEngine.hasGraph && ua && !ua.hasBeenActive) {
+      pending = msg;
+      hookGesture();
+      return;
+    }
 
     const el = await waitForVideo();
     if (!el) return;
@@ -57,7 +93,8 @@ export default defineUnlistedScript(() => {
     await audioEngine.ensureGraph(el, msg.processorUrl);
     audioEngine.applyTempo(msg.tempo);
     audioEngine.applySemitones(msg.semitones);
-    // The originating popup click is a user gesture, so resuming here succeeds.
+    // We only reach a graph build after user activation (popup click, or the
+    // gesture gate above), so the context can resume here.
     await audioEngine.resume();
   }
 

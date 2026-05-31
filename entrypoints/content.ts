@@ -156,11 +156,15 @@ export default defineContentScript({
       },
     );
 
-    // Re-apply on YouTube's SPA navigation (same element, new video ID).
-    ctx.addEventListener(document, 'yt-navigate-finish', () => void apply());
+    // Re-apply on YouTube's SPA navigation (same element, new video ID). Sync
+    // `lastUrl` so the poll below doesn't fire a second redundant apply.
+    let lastUrl = location.href;
+    ctx.addEventListener(document, 'yt-navigate-finish', () => {
+      lastUrl = location.href;
+      void apply();
+    });
 
     // Fallback: catch URL changes the event might miss.
-    let lastUrl = location.href;
     ctx.setInterval(() => {
       if (location.href !== lastUrl) {
         lastUrl = location.href;
