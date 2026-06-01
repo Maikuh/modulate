@@ -1,35 +1,41 @@
 {
-  "name": "modulate",
-  "description": "manifest.json description",
-  "private": true,
-  "version": "0.0.1",
-  "type": "module",
-  "license": "GPL-3.0-only",
-  "scripts": {
-    "dev": "wxt",
-    "dev:firefox": "wxt -b firefox",
-    "build": "wxt build",
-    "build:firefox": "wxt build -b firefox",
-    "zip": "wxt zip",
-    "zip:firefox": "wxt zip -b firefox",
-    "compile": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "postinstall": "wxt prepare"
-  },
-  "dependencies": {
-    "@soundtouchjs/audio-worklet": "^2.0.3",
-    "preact": "^10.29.2"
-  },
-  "devDependencies": {
-    "@preact/preset-vite": "^2.10.5",
-    "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/preact": "^3.2.4",
-    "@testing-library/user-event": "^14.6.1",
-    "@wxt-dev/auto-icons": "^1.1.1",
-    "happy-dom": "^20.9.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.7",
-    "wxt": "^0.20.26"
-  }
+	"name": "modulate",
+	"version": "0.0.1",
+	"private": true,
+	"description": "manifest.json description",
+	"license": "GPL-3.0-only",
+	"type": "module",
+	"scripts": {
+		"dev": "wxt",
+		"dev:firefox": "wxt -b firefox",
+		"build": "wxt build",
+		"build:firefox": "wxt build -b firefox",
+		"zip": "wxt zip",
+		"zip:firefox": "wxt zip -b firefox",
+		"compile": "tsc --noEmit",
+		"lint": "oxlint",
+		"lint:fix": "oxlint --fix",
+		"format": "oxfmt",
+		"format:check": "oxfmt --check",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"postinstall": "wxt prepare"
+	},
+	"dependencies": {
+		"@soundtouchjs/audio-worklet": "^2.0.3",
+		"preact": "^10.29.2"
+	},
+	"devDependencies": {
+		"@preact/preset-vite": "^2.10.5",
+		"@testing-library/jest-dom": "^6.9.1",
+		"@testing-library/preact": "^3.2.4",
+		"@testing-library/user-event": "^14.6.1",
+		"@wxt-dev/auto-icons": "^1.1.1",
+		"happy-dom": "^20.9.0",
+		"oxfmt": "^0.52.0",
+		"oxlint": "^1.67.0",
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.7",
+		"wxt": "^0.20.26"
+	}
 }

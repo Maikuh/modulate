@@ -1,177 +1,173 @@
-import { useCallback, useEffect, useState } from 'preact/hooks';
-import type { PlayerState, PopupMessage } from '@/lib/messaging';
-import {
-  MIN_SEMITONES,
-  MAX_SEMITONES,
-  MIN_TEMPO,
-  MAX_TEMPO,
-  TEMPO_STEP,
-} from '@/lib/storage';
-import { Logo, PitchIcon, TempoIcon, ResetIcon, GearIcon } from '@/lib/icons';
-import { ControlRow } from './components/ControlRow';
-import { Toggle } from './components/Toggle';
+import { useCallback, useEffect, useState } from 'preact/hooks'
+
+import { Logo, PitchIcon, TempoIcon, ResetIcon, GearIcon } from '@/lib/icons'
+import type { PlayerState, PopupMessage } from '@/lib/messaging'
+import { MIN_SEMITONES, MAX_SEMITONES, MIN_TEMPO, MAX_TEMPO, TEMPO_STEP } from '@/lib/storage'
+
+import { ControlRow } from './components/ControlRow'
+import { Toggle } from './components/Toggle'
 
 /** Send a message to the content script in the active tab; null if none responds. */
 async function send(msg: PopupMessage): Promise<PlayerState | null> {
-  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id == null) return null;
-  try {
-    return (await browser.tabs.sendMessage(tab.id, msg)) as PlayerState;
-  } catch {
-    // No content script in this tab (not a YouTube page).
-    return null;
-  }
+	const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+	if (tab?.id == null) return null
+	try {
+		return (await browser.tabs.sendMessage(tab.id, msg)) as PlayerState
+	} catch {
+		// No content script in this tab (not a YouTube page).
+		return null
+	}
 }
 
 function App() {
-  const [state, setState] = useState<PlayerState | null>(null);
-  const [loading, setLoading] = useState(true);
+	const [state, setState] = useState<PlayerState | null>(null)
+	const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    send({ type: 'GET_STATE' })
-      .then(setState)
-      .finally(() => setLoading(false));
-  }, []);
+	useEffect(() => {
+		send({ type: 'GET_STATE' })
+			.then(setState)
+			.finally(() => setLoading(false))
+	}, [])
 
-  const dispatch = useCallback(async (msg: PopupMessage) => {
-    const s = await send(msg);
-    if (s) setState(s);
-  }, []);
+	const dispatch = useCallback(async (msg: PopupMessage) => {
+		const s = await send(msg)
+		if (s) setState(s)
+	}, [])
 
-  if (loading) {
-    return (
-      <div className="popup">
-        <div className="state">
-          <span className="state__mark">
-            <Logo />
-          </span>
-          <span className="dots">
-            <span />
-            <span />
-            <span />
-          </span>
-        </div>
-      </div>
-    );
-  }
+	if (loading) {
+		return (
+			<div className="popup">
+				<div className="state">
+					<span className="state__mark">
+						<Logo />
+					</span>
+					<span className="dots">
+						<span />
+						<span />
+						<span />
+					</span>
+				</div>
+			</div>
+		)
+	}
 
-  const onYouTube = state?.videoId != null;
+	const onYouTube = state?.videoId != null
 
-  if (!state || !onYouTube) {
-    return (
-      <div className="popup">
-        <div className="state">
-          <span className="state__mark">
-            <Logo />
-          </span>
-          <h1 className="state__title">Modulate</h1>
-          <p className="state__msg">Open a YouTube video to shift its pitch and bend its tempo.</p>
-        </div>
-      </div>
-    );
-  }
+	if (!state || !onYouTube) {
+		return (
+			<div className="popup">
+				<div className="state">
+					<span className="state__mark">
+						<Logo />
+					</span>
+					<h1 className="state__title">Modulate</h1>
+					<p className="state__msg">Open a YouTube video to shift its pitch and bend its tempo.</p>
+				</div>
+			</div>
+		)
+	}
 
-  const controlsDisabled = !state.globalEnabled || !state.enabled;
+	const controlsDisabled = !state.globalEnabled || !state.enabled
 
-  return (
-    <div className="popup">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand__mark">
-            <Logo />
-          </span>
-          <span className="brand__text">
-            <span className="brand__name">Modulate</span>
-            <span className="brand__sub">Pitch &amp; tempo</span>
-          </span>
-        </div>
-        <div className="topbar__right">
-          <span className={`master-state${state.globalEnabled ? ' master-state--on' : ''}`}>
-            {state.globalEnabled ? 'On' : 'Off'}
-          </span>
-          <Toggle
-            checked={state.globalEnabled}
-            aria-label="Master switch"
-            onChange={(enabled) => dispatch({ type: 'SET_GLOBAL_ENABLED', enabled })}
-          />
-        </div>
-      </header>
+	return (
+		<div className="popup">
+			<header className="topbar">
+				<div className="brand">
+					<span className="brand__mark">
+						<Logo />
+					</span>
+					<span className="brand__text">
+						<span className="brand__name">Modulate</span>
+						<span className="brand__sub">Pitch &amp; tempo</span>
+					</span>
+				</div>
+				<div className="topbar__right">
+					<span className={`master-state${state.globalEnabled ? ' master-state--on' : ''}`}>
+						{state.globalEnabled ? 'On' : 'Off'}
+					</span>
+					<Toggle
+						checked={state.globalEnabled}
+						aria-label="Master switch"
+						onChange={(enabled) => dispatch({ type: 'SET_GLOBAL_ENABLED', enabled })}
+					/>
+				</div>
+			</header>
 
-      <main className="body">
-        {!state.globalEnabled && (
-          <p className="paused">Modulate is off. Flip the switch to start tuning audio.</p>
-        )}
+			<main className="body">
+				{!state.globalEnabled && (
+					<p className="paused">Modulate is off. Flip the switch to start tuning audio.</p>
+				)}
 
-        <ControlRow
-          label="Pitch"
-          icon={<PitchIcon />}
-          value={state.semitones}
-          min={MIN_SEMITONES}
-          max={MAX_SEMITONES}
-          step={1}
-          resetValue={0}
-          displayValue={(v) => (
-            <>
-              {v > 0 ? `+${v}` : v}
-              <small>st</small>
-            </>
-          )}
-          onStep={(delta) => dispatch({ type: 'NUDGE_SEMITONES', delta })}
-          onSet={(semitones) => dispatch({ type: 'SET_SEMITONES', semitones })}
-          onReset={() => dispatch({ type: 'SET_SEMITONES', semitones: 0 })}
-          disabled={controlsDisabled}
-        />
+				<ControlRow
+					label="Pitch"
+					icon={<PitchIcon />}
+					value={state.semitones}
+					min={MIN_SEMITONES}
+					max={MAX_SEMITONES}
+					step={1}
+					resetValue={0}
+					displayValue={(v) => (
+						<>
+							{v > 0 ? `+${v}` : v}
+							<small>st</small>
+						</>
+					)}
+					onStep={(delta) => dispatch({ type: 'NUDGE_SEMITONES', delta })}
+					onSet={(semitones) => dispatch({ type: 'SET_SEMITONES', semitones })}
+					onReset={() => dispatch({ type: 'SET_SEMITONES', semitones: 0 })}
+					disabled={controlsDisabled}
+				/>
 
-        <div className="divider" />
+				<div className="divider" />
 
-        <ControlRow
-          label="Tempo"
-          icon={<TempoIcon />}
-          value={state.tempo}
-          min={MIN_TEMPO}
-          max={MAX_TEMPO}
-          step={TEMPO_STEP}
-          resetValue={1}
-          displayValue={(v) => (
-            <>
-              {v.toFixed(2)}
-              <small>×</small>
-            </>
-          )}
-          onStep={(delta) => dispatch({ type: 'NUDGE_TEMPO', delta })}
-          onSet={(tempo) => dispatch({ type: 'SET_TEMPO', tempo })}
-          onReset={() => dispatch({ type: 'SET_TEMPO', tempo: 1 })}
-          disabled={controlsDisabled}
-        />
+				<ControlRow
+					label="Tempo"
+					icon={<TempoIcon />}
+					value={state.tempo}
+					min={MIN_TEMPO}
+					max={MAX_TEMPO}
+					step={TEMPO_STEP}
+					resetValue={1}
+					displayValue={(v) => (
+						<>
+							{v.toFixed(2)}
+							<small>×</small>
+						</>
+					)}
+					onStep={(delta) => dispatch({ type: 'NUDGE_TEMPO', delta })}
+					onSet={(tempo) => dispatch({ type: 'SET_TEMPO', tempo })}
+					onReset={() => dispatch({ type: 'SET_TEMPO', tempo: 1 })}
+					disabled={controlsDisabled}
+				/>
 
-        <div className="divider" />
+				<div className="divider" />
 
-        <div className={`vid${!state.globalEnabled ? ' vid--disabled' : ''}`}>
-          <span className="vid__text">
-            <span className="vid__label">This video</span>
-            <span className="vid__desc">Apply saved pitch &amp; tempo here</span>
-          </span>
-          <Toggle
-            checked={state.enabled}
-            disabled={!state.globalEnabled}
-            aria-label="Enable for this video"
-            onChange={(enabled) => dispatch({ type: 'SET_VIDEO_ENABLED', enabled })}
-          />
-        </div>
-      </main>
+				<div className={`vid${!state.globalEnabled ? ' vid--disabled' : ''}`}>
+					<span className="vid__text">
+						<span className="vid__label">This video</span>
+						<span className="vid__desc">Apply saved pitch &amp; tempo here</span>
+					</span>
+					<Toggle
+						checked={state.enabled}
+						disabled={!state.globalEnabled}
+						aria-label="Enable for this video"
+						onChange={(enabled) => dispatch({ type: 'SET_VIDEO_ENABLED', enabled })}
+					/>
+				</div>
+			</main>
 
-      <footer className="actions">
-        <button className="action" onClick={() => dispatch({ type: 'RESET' })}>
-          <ResetIcon />
-          Reset
-        </button>
-        <button className="action" onClick={() => browser.runtime.openOptionsPage()}>
-          <GearIcon />
-          Options
-        </button>
-      </footer>
-    </div>
-  );
+			<footer className="actions">
+				<button className="action" onClick={() => dispatch({ type: 'RESET' })}>
+					<ResetIcon />
+					Reset
+				</button>
+				<button className="action" onClick={() => browser.runtime.openOptionsPage()}>
+					<GearIcon />
+					Options
+				</button>
+			</footer>
+		</div>
+	)
 }
 
-export default App;
+export default App

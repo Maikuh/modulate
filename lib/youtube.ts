@@ -6,11 +6,11 @@
  * which case there is no per-video setting to apply.
  */
 export function getVideoId(url: string): string | null {
-  try {
-    const u = new URL(url);
-    if (!/(^|\.)youtube\.com$/.test(u.hostname)) return null;
-    return u.searchParams.get('v');
-  } catch {
-    return null;
-  }
+	try {
+		const u = new URL(url)
+		if (!/(^|\.)youtube\.com$/.test(u.hostname)) return null
+		return u.searchParams.get('v')
+	} catch {
+		return null
+	}
 }

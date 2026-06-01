@@ -6,16 +6,16 @@
  * `storage.ts` — which touches extension APIs unavailable in the page realm.
  */
 export interface AudioQuality {
-  overlapMs: number;
-  quickSeek: boolean;
-  sequenceMs: number;
-  seekWindowMs: number;
+	overlapMs: number
+	quickSeek: boolean
+	sequenceMs: number
+	seekWindowMs: number
 }
 
 /** Defaults mirror the values the audio engine used to hardcode. */
 export const DEFAULT_AUDIO_QUALITY: AudioQuality = {
-  overlapMs: 12,
-  quickSeek: false,
-  sequenceMs: 0,
-  seekWindowMs: 0,
-};
+	overlapMs: 12,
+	quickSeek: false,
+	sequenceMs: 0,
+	seekWindowMs: 0,
+}

@@ -14,10 +14,12 @@ Package manager is **bun** (`bun.lock`).
 - `bun run dev:firefox` — dev server, Firefox (MV2)
 - `bun run build` / `bun run build:firefox` — production build
 - `bun run zip` / `bun run zip:firefox` — packaged extension for store upload
-- `bun run compile` — `tsc --noEmit` type check (the only check; there are no tests or linter)
+- `bun run compile` — `tsc --noEmit` type check
+- `bun run lint` / `bun run lint:fix` — oxlint (`.oxlintrc.json`); `lib`/`entrypoints`, react + jsx-a11y + import + vitest plugins
+- `bun run format` / `bun run format:check` — oxfmt (`.oxfmtrc.json`): tabs, no semi, single quote, trailing commas, import sort
 - `postinstall` runs `wxt prepare` (regenerates `.wxt/` types); run it manually if imports/types look stale
 
-There is no test suite. Verify changes by loading the unpacked build and exercising the popup (and the options page) on a YouTube watch page.
+Tests run via Vitest (`bun run test` / `test:watch`) — happy-dom env, unit + Testing Library component specs (`*.test.ts`/`*.test.tsx`). They don't exercise the live audio graph or the three-realm message flow, so also verify changes by loading the unpacked build and exercising the popup (and the options page) on a YouTube watch page.
 
 ## Architecture: three realms, two message hops
 
