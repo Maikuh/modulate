@@ -55,7 +55,10 @@ function App() {
 					<Logo />
 				</span>
 				<div>
-					<h1 className="o-title">Modulate</h1>
+					<h1 className="o-title">
+						Modulate
+						<span className="o-ver">v{browser.runtime.getManifest().version}</span>
+					</h1>
 					<p className="o-subtitle">Settings &amp; saved videos</p>
 				</div>
 			</header>
@@ -205,50 +208,52 @@ function App() {
 						</div>
 					) : (
 						<>
-							{videoIds.map((id) => {
-								const s = videos[id]
-								const label = s.title ?? id
-								return (
-									<div className="vrow" key={id}>
-										<a
-											className="vrow__main"
-											href={`https://www.youtube.com/watch?v=${id}`}
-											target="_blank"
-											rel="noreferrer"
-											title={label}
-											aria-label={`Open ${label} on YouTube`}
-										>
-											<img
-												className="vrow__thumb"
-												src={`https://i.ytimg.com/vi/${id}/mqdefault.jpg`}
-												alt=""
-												loading="lazy"
-												onError={(e) => {
-													e.currentTarget.style.visibility = 'hidden'
-												}}
-											/>
-											<div className="vrow__info">
-												<span className="vrow__id">{label}</span>
-												<div className="vrow__chips">
-													<span className="chip">{formatSemitones(s.semitones)} st</span>
-													<span className="chip">{s.tempo.toFixed(2)}×</span>
-													{!s.enabled && <span className="chip chip--off">off</span>}
+							<div className="vlist">
+								{videoIds.map((id) => {
+									const s = videos[id]
+									const label = s.title ?? id
+									return (
+										<div className="vrow" key={id}>
+											<a
+												className="vrow__main"
+												href={`https://www.youtube.com/watch?v=${id}`}
+												target="_blank"
+												rel="noreferrer"
+												title={label}
+												aria-label={`Open ${label} on YouTube`}
+											>
+												<img
+													className="vrow__thumb"
+													src={`https://i.ytimg.com/vi/${id}/mqdefault.jpg`}
+													alt=""
+													loading="lazy"
+													onError={(e) => {
+														e.currentTarget.style.visibility = 'hidden'
+													}}
+												/>
+												<div className="vrow__info">
+													<span className="vrow__id">{label}</span>
+													<div className="vrow__chips">
+														<span className="chip">{formatSemitones(s.semitones)} st</span>
+														<span className="chip">{s.tempo.toFixed(2)}×</span>
+														{!s.enabled && <span className="chip chip--off">off</span>}
+													</div>
 												</div>
-											</div>
-										</a>
-										<button
-											className="icon-btn"
-											aria-label="Remove"
-											onClick={async () => {
-												await removeVideoSetting(id)
-												await refresh()
-											}}
-										>
-											<TrashIcon />
-										</button>
-									</div>
-								)
-							})}
+											</a>
+											<button
+												className="icon-btn"
+												aria-label="Remove"
+												onClick={async () => {
+													await removeVideoSetting(id)
+													await refresh()
+												}}
+											>
+												<TrashIcon />
+											</button>
+										</div>
+									)
+								})}
+							</div>
 							<div className="vrow-actions">
 								<button
 									className="btn btn--danger"
