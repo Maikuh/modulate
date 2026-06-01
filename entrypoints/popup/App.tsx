@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Minus, Plus, RotateCcw, Settings } from 'lucide-react';
 import type { PlayerState, PopupMessage } from '@/lib/messaging';
 import {
   MIN_SEMITONES,
@@ -8,8 +7,9 @@ import {
   MAX_TEMPO,
   TEMPO_STEP,
 } from '@/lib/storage';
-import { formatSemitones } from '@/lib/format';
-import './App.css';
+import { Logo, PitchIcon, TempoIcon, ResetIcon, GearIcon } from '@/lib/icons';
+import { ControlRow } from './components/ControlRow';
+import { Toggle } from './components/Toggle';
 
 /** Send a message to the content script in the active tab; null if none responds. */
 async function send(msg: PopupMessage): Promise<PlayerState | null> {
@@ -40,161 +40,137 @@ function App() {
 
   if (loading) {
     return (
-      <main className="popup">
-        <p className="muted">Loading…</p>
-      </main>
+      <div className="popup">
+        <div className="state">
+          <span className="state__mark">
+            <Logo />
+          </span>
+          <span className="dots">
+            <span />
+            <span />
+            <span />
+          </span>
+        </div>
+      </div>
     );
   }
 
   const onYouTube = state?.videoId != null;
-  const global = state?.globalEnabled ?? true;
-  const videoEnabled = state?.enabled ?? true;
-  const semitones = state?.semitones ?? 0;
-  const tempo = state?.tempo ?? 1;
-  const active = onYouTube && global && videoEnabled;
+
+  if (!state || !onYouTube) {
+    return (
+      <div className="popup">
+        <div className="state">
+          <span className="state__mark">
+            <Logo />
+          </span>
+          <h1 className="state__title">Modulate</h1>
+          <p className="state__msg">Open a YouTube video to shift its pitch and bend its tempo.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const controlsDisabled = !state.globalEnabled || !state.enabled;
 
   return (
-    <main className="popup">
-      <header className="header">
-        <div className="title-row">
-          <h1>Modulate</h1>
-          <button
-            className="icon-button"
-            aria-label="Open settings"
-            title="Settings"
-            onClick={() => browser.runtime.openOptionsPage()}
-          >
-            <Settings size={18} aria-hidden />
-          </button>
+    <div className="popup">
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand__mark">
+            <Logo />
+          </span>
+          <span className="brand__text">
+            <span className="brand__name">Modulate</span>
+            <span className="brand__sub">Pitch &amp; tempo</span>
+          </span>
         </div>
-        <label className="switch" title="Master switch for all videos">
-          <input
-            type="checkbox"
-            checked={global}
-            onChange={(e) =>
-              dispatch({ type: 'SET_GLOBAL_ENABLED', enabled: e.target.checked })
-            }
+        <div className="topbar__right">
+          <span className={`master-state${state.globalEnabled ? ' master-state--on' : ''}`}>
+            {state.globalEnabled ? 'On' : 'Off'}
+          </span>
+          <Toggle
+            checked={state.globalEnabled}
+            aria-label="Master switch"
+            onChange={(enabled) => dispatch({ type: 'SET_GLOBAL_ENABLED', enabled })}
           />
-          <span>Enabled globally</span>
-        </label>
+        </div>
       </header>
 
-      {!onYouTube ? (
-        <p className="muted empty">Open a YouTube video to transpose its audio.</p>
-      ) : (
-        <>
-          <label className="switch" title="Enable for this video only">
-            <input
-              type="checkbox"
-              checked={videoEnabled}
-              disabled={!global}
-              onChange={(e) =>
-                dispatch({ type: 'SET_VIDEO_ENABLED', enabled: e.target.checked })
-              }
-            />
-            <span>Enabled for this video</span>
-          </label>
+      <main className="body">
+        {!state.globalEnabled && (
+          <p className="paused">Modulate is off. Flip the switch to start tuning audio.</p>
+        )}
 
-          <div className={`control ${active ? '' : 'dim'}`}>
-            <div className="stepper">
-              <button
-                aria-label="Down a semitone"
-                disabled={!active || semitones <= MIN_SEMITONES}
-                onClick={() => dispatch({ type: 'SET_SEMITONES', semitones: semitones - 1 })}
-              >
-                <Minus size={22} strokeWidth={2.5} aria-hidden />
-              </button>
-              <div className="readout">
-                <span className="value">{formatSemitones(semitones)}</span>
-                <span className="unit">semitones</span>
-                <button
-                  className="reset-control"
-                  aria-label="Reset pitch"
-                  title="Reset pitch"
-                  disabled={!active || semitones === 0}
-                  onClick={() => dispatch({ type: 'SET_SEMITONES', semitones: 0 })}
-                >
-                  <RotateCcw size={13} aria-hidden />
-                </button>
-              </div>
-              <button
-                aria-label="Up a semitone"
-                disabled={!active || semitones >= MAX_SEMITONES}
-                onClick={() => dispatch({ type: 'SET_SEMITONES', semitones: semitones + 1 })}
-              >
-                <Plus size={22} strokeWidth={2.5} aria-hidden />
-              </button>
-            </div>
-            <input
-              type="range"
-              className="slider"
-              aria-label="Pitch in semitones"
-              min={MIN_SEMITONES}
-              max={MAX_SEMITONES}
-              step={1}
-              value={semitones}
-              disabled={!active}
-              onChange={(e) =>
-                dispatch({ type: 'SET_SEMITONES', semitones: Number(e.target.value) })
-              }
-            />
-          </div>
+        <ControlRow
+          label="Pitch"
+          icon={<PitchIcon />}
+          value={state.semitones}
+          min={MIN_SEMITONES}
+          max={MAX_SEMITONES}
+          step={1}
+          resetValue={0}
+          displayValue={(v) => (
+            <>
+              {v > 0 ? `+${v}` : v}
+              <small>st</small>
+            </>
+          )}
+          onStep={(delta) => dispatch({ type: 'NUDGE_SEMITONES', delta })}
+          onSet={(semitones) => dispatch({ type: 'SET_SEMITONES', semitones })}
+          onReset={() => dispatch({ type: 'SET_SEMITONES', semitones: 0 })}
+          disabled={controlsDisabled}
+        />
 
-          <div className={`control ${active ? '' : 'dim'}`}>
-            <div className="stepper">
-              <button
-                aria-label="Slower"
-                disabled={!active || tempo <= MIN_TEMPO}
-                onClick={() => dispatch({ type: 'SET_TEMPO', tempo: tempo - TEMPO_STEP })}
-              >
-                <Minus size={22} strokeWidth={2.5} aria-hidden />
-              </button>
-              <div className="readout">
-                <span className="value">{tempo.toFixed(2)}×</span>
-                <span className="unit">speed</span>
-                <button
-                  className="reset-control"
-                  aria-label="Reset speed"
-                  title="Reset speed"
-                  disabled={!active || tempo === 1}
-                  onClick={() => dispatch({ type: 'SET_TEMPO', tempo: 1 })}
-                >
-                  <RotateCcw size={13} aria-hidden />
-                </button>
-              </div>
-              <button
-                aria-label="Faster"
-                disabled={!active || tempo >= MAX_TEMPO}
-                onClick={() => dispatch({ type: 'SET_TEMPO', tempo: tempo + TEMPO_STEP })}
-              >
-                <Plus size={22} strokeWidth={2.5} aria-hidden />
-              </button>
-            </div>
-            <input
-              type="range"
-              className="slider"
-              aria-label="Playback speed"
-              min={MIN_TEMPO}
-              max={MAX_TEMPO}
-              step={TEMPO_STEP}
-              value={tempo}
-              disabled={!active}
-              onChange={(e) =>
-                dispatch({ type: 'SET_TEMPO', tempo: Number(e.target.value) })
-              }
-            />
-          </div>
+        <div className="divider" />
 
-          <button
-            className="reset"
-            disabled={!active || (semitones === 0 && tempo === 1)}
-            onClick={() => dispatch({ type: 'RESET' })}
-          >
-            Reset
-          </button>
-        </>
-      )}
-    </main>
+        <ControlRow
+          label="Tempo"
+          icon={<TempoIcon />}
+          value={state.tempo}
+          min={MIN_TEMPO}
+          max={MAX_TEMPO}
+          step={TEMPO_STEP}
+          resetValue={1}
+          displayValue={(v) => (
+            <>
+              {v.toFixed(2)}
+              <small>×</small>
+            </>
+          )}
+          onStep={(delta) => dispatch({ type: 'NUDGE_TEMPO', delta })}
+          onSet={(tempo) => dispatch({ type: 'SET_TEMPO', tempo })}
+          onReset={() => dispatch({ type: 'SET_TEMPO', tempo: 1 })}
+          disabled={controlsDisabled}
+        />
+
+        <div className="divider" />
+
+        <div className={`vid${!state.globalEnabled ? ' vid--disabled' : ''}`}>
+          <span className="vid__text">
+            <span className="vid__label">This video</span>
+            <span className="vid__desc">Apply saved pitch &amp; tempo here</span>
+          </span>
+          <Toggle
+            checked={state.enabled}
+            disabled={!state.globalEnabled}
+            aria-label="Enable for this video"
+            onChange={(enabled) => dispatch({ type: 'SET_VIDEO_ENABLED', enabled })}
+          />
+        </div>
+      </main>
+
+      <footer className="actions">
+        <button className="action" onClick={() => dispatch({ type: 'RESET' })}>
+          <ResetIcon />
+          Reset
+        </button>
+        <button className="action" onClick={() => browser.runtime.openOptionsPage()}>
+          <GearIcon />
+          Options
+        </button>
+      </footer>
+    </div>
   );
 }
 

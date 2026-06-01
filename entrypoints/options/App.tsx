@@ -10,7 +10,7 @@ import {
   clearVideoSettings,
 } from '@/lib/storage';
 import { formatSemitones } from '@/lib/format';
-import './App.css';
+import { Logo, PowerIcon, SlidersIcon, FilmIcon, TrashIcon } from '@/lib/icons';
 
 function App() {
   const [global, setGlobal] = useState(true);
@@ -32,150 +32,234 @@ function App() {
     void refresh();
   }, [refresh]);
 
-  const patchQuality = useCallback(
-    async (partial: Partial<AudioQuality>) => {
-      const next = { ...quality, ...partial };
-      setQuality(next);
-      await audioQuality.setValue(next);
-    },
-    [quality],
-  );
-
   const toggleGlobal = useCallback(async (value: boolean) => {
     setGlobal(value);
     await globalEnabled.setValue(value);
   }, []);
 
+  const patchQuality = useCallback(
+    async (partial: Partial<AudioQuality>) => {
+      setQuality((prev) => {
+        const next = { ...prev, ...partial };
+        void audioQuality.setValue(next);
+        return next;
+      });
+    },
+    [],
+  );
+
   const videoIds = Object.keys(videos);
 
   return (
-    <main className="options">
-      <header>
-        <h1>Modulate</h1>
-        <p className="muted">Settings &amp; saved transpositions</p>
+    <div className="options">
+      <header className="o-head">
+        <span className="o-mark">
+          <Logo />
+        </span>
+        <div>
+          <h1 className="o-title">Modulate</h1>
+          <p className="o-subtitle">Settings &amp; saved videos</p>
+        </div>
       </header>
 
-      <section>
-        <h2>General</h2>
-        <label className="switch">
-          <input
-            type="checkbox"
-            checked={global}
-            onChange={(e) => void toggleGlobal(e.target.checked)}
-          />
-          <span>Enabled globally</span>
-        </label>
+      <section className="o-section">
+        <div className="o-section__head">
+          <span className="o-section__icon">
+            <PowerIcon />
+          </span>
+          <div>
+            <h2 className="o-section__title">General</h2>
+            <p className="o-section__desc">Master switch for every video.</p>
+          </div>
+        </div>
+        <div className="card">
+          <div className="row">
+            <div className="row__text">
+              <span className="row__label">Enable Modulate</span>
+              <span className="row__desc">Turn all pitch and tempo processing on or off.</span>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={global}
+                onChange={(e) => void toggleGlobal(e.target.checked)}
+              />
+              <span className="toggle__track">
+                <span className="toggle__thumb" />
+              </span>
+            </label>
+          </div>
+        </div>
       </section>
 
-      <section>
-        <h2>Audio quality</h2>
-        <p className="muted hint">
-          WSOLA time-stretch tuning. Higher overlap and full seek reduce artifacts
-          at extreme shifts but cost CPU and a little smearing. Use 0 for
-          auto-calculated timing.
-        </p>
-        <div className="field">
-          <label htmlFor="overlap">Overlap (ms): {quality.overlapMs}</label>
-          <input
-            id="overlap"
-            type="range"
-            min={0}
-            max={40}
-            step={1}
-            value={quality.overlapMs}
-            onChange={(e) => void patchQuality({ overlapMs: Number(e.target.value) })}
-          />
+      <section className="o-section">
+        <div className="o-section__head">
+          <span className="o-section__icon">
+            <SlidersIcon />
+          </span>
+          <div>
+            <h2 className="o-section__title">Audio Quality</h2>
+            <p className="o-section__desc">
+              WSOLA time-stretch tuning. Higher overlap reduces artifacts at extreme shifts but costs
+              CPU. Use 0 for auto-calculated timing.
+            </p>
+          </div>
         </div>
-        <label className="switch">
-          <input
-            type="checkbox"
-            checked={quality.quickSeek}
-            onChange={(e) => void patchQuality({ quickSeek: e.target.checked })}
-          />
-          <span>Quick seek (faster, slightly more artifacts)</span>
-        </label>
-        <div className="field-row">
-          <div className="field">
-            <label htmlFor="sequence">Sequence (ms)</label>
+        <div className="card">
+          <div className="row">
+            <div className="row__text">
+              <span className="row__label">Overlap (ms)</span>
+              <span className="row__desc">Crossfade between processing windows.</span>
+            </div>
+            <div className="quality-control">
+              <input
+                type="range"
+                className="slider"
+                min={0}
+                max={40}
+                step={1}
+                value={quality.overlapMs}
+                onChange={(e) => void patchQuality({ overlapMs: Number(e.target.value) })}
+              />
+              <span className="quality-value">{quality.overlapMs}</span>
+            </div>
+          </div>
+
+          <div className="row">
+            <div className="row__text">
+              <span className="row__label">Quick seek</span>
+              <span className="row__desc">Faster processing, slightly more artifacts.</span>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={quality.quickSeek}
+                onChange={(e) => void patchQuality({ quickSeek: e.target.checked })}
+              />
+              <span className="toggle__track">
+                <span className="toggle__thumb" />
+              </span>
+            </label>
+          </div>
+
+          <div className="row">
+            <div className="row__text">
+              <span className="row__label">Sequence (ms)</span>
+              <span className="row__desc">Window length. 0 = auto.</span>
+            </div>
             <input
-              id="sequence"
               type="number"
+              className="num"
               min={0}
               value={quality.sequenceMs}
               onChange={(e) => void patchQuality({ sequenceMs: Number(e.target.value) })}
             />
           </div>
-          <div className="field">
-            <label htmlFor="seek">Seek window (ms)</label>
+
+          <div className="row">
+            <div className="row__text">
+              <span className="row__label">Seek window (ms)</span>
+              <span className="row__desc">Search range for best overlap. 0 = auto.</span>
+            </div>
             <input
-              id="seek"
               type="number"
+              className="num"
               min={0}
               value={quality.seekWindowMs}
               onChange={(e) => void patchQuality({ seekWindowMs: Number(e.target.value) })}
             />
           </div>
+
+          <div className="row">
+            <div className="row__text">
+              <span className="row__label">Restore defaults</span>
+              <span className="row__desc">Reset every quality knob to its recommended value.</span>
+            </div>
+            <button className="btn" onClick={() => void patchQuality(DEFAULT_AUDIO_QUALITY)}>
+              Restore
+            </button>
+          </div>
         </div>
-        <button
-          className="secondary"
-          onClick={() => void patchQuality(DEFAULT_AUDIO_QUALITY)}
-        >
-          Restore defaults
-        </button>
       </section>
 
-      <section>
-        <div className="section-head">
-          <h2>Saved videos ({videoIds.length})</h2>
-          {videoIds.length > 0 && (
-            <button
-              className="secondary"
-              onClick={async () => {
-                await clearVideoSettings();
-                await refresh();
-              }}
-            >
-              Clear all
-            </button>
+      <section className="o-section">
+        <div className="o-section__head">
+          <span className="o-section__icon">
+            <FilmIcon />
+          </span>
+          <div>
+            <h2 className="o-section__title">Saved Videos</h2>
+            <p className="o-section__desc">
+              Per-video pitch and tempo{videoIds.length > 0 ? ` · ${videoIds.length}` : ''}.
+            </p>
+          </div>
+        </div>
+        <div className="card">
+          {videoIds.length === 0 ? (
+            <div className="o-empty">
+              <FilmIcon className="o-empty__icon" />
+              <p>No saved videos yet. Tune any YouTube video and it will appear here.</p>
+            </div>
+          ) : (
+            <>
+              {videoIds.map((id) => {
+                const s = videos[id];
+                return (
+                  <div className="vrow" key={id}>
+                    <a
+                      className="vrow__main"
+                      href={`https://www.youtube.com/watch?v=${id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={id}
+                    >
+                      <img
+                        className="vrow__thumb"
+                        src={`https://i.ytimg.com/vi/${id}/mqdefault.jpg`}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.style.visibility = 'hidden';
+                        }}
+                      />
+                      <div className="vrow__info">
+                        <span className="vrow__id">{id}</span>
+                        <div className="vrow__chips">
+                          <span className="chip">{formatSemitones(s.semitones)} st</span>
+                          <span className="chip">{s.tempo.toFixed(2)}×</span>
+                          {!s.enabled && <span className="chip chip--off">off</span>}
+                        </div>
+                      </div>
+                    </a>
+                    <button
+                      className="icon-btn"
+                      aria-label="Remove"
+                      onClick={async () => {
+                        await removeVideoSetting(id);
+                        await refresh();
+                      }}
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
+                );
+              })}
+              <div className="vrow-actions">
+                <button
+                  className="btn btn--danger"
+                  onClick={async () => {
+                    await clearVideoSettings();
+                    await refresh();
+                  }}
+                >
+                  Clear all
+                </button>
+              </div>
+            </>
           )}
         </div>
-        {videoIds.length === 0 ? (
-          <p className="muted">No per-video settings saved.</p>
-        ) : (
-          <ul className="rows">
-            {videoIds.map((id) => {
-              const s = videos[id];
-              return (
-                <li key={id} className="row">
-                  <a
-                    className="row-id"
-                    href={`https://www.youtube.com/watch?v=${id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={id}
-                  >
-                    {id}
-                  </a>
-                  <span className="row-meta">
-                    {formatSemitones(s.semitones)} st · {s.tempo.toFixed(2)}×
-                    {s.enabled ? '' : ' · off'}
-                  </span>
-                  <button
-                    className="link danger"
-                    onClick={async () => {
-                      await removeVideoSetting(id);
-                      await refresh();
-                    }}
-                  >
-                    Remove
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
       </section>
-    </main>
+    </div>
   );
 }
 
