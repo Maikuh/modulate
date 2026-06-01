@@ -22,6 +22,7 @@
 		"postinstall": "wxt prepare"
 	},
 	"dependencies": {
+		"@preact/signals": "^2.9.1",
 		"@soundtouchjs/audio-worklet": "^2.0.3",
 		"preact": "^10.29.2"
 	},

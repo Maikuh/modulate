@@ -10,7 +10,9 @@
 		"webextensions": true,
 		"es2024": true
 	},
-	"rules": {},
+	"rules": {
+		"react-hooks/exhaustive-deps": "off"
+	},
 	"overrides": [
 		{
 			"files": ["**/*.test.ts", "**/*.test.tsx"],

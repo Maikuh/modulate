@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'preact/hooks'
+import { useSignal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 
 import { formatSemitones } from '@/lib/format'
 import { Logo, PowerIcon, SlidersIcon, FilmIcon, TrashIcon } from '@/lib/icons'
@@ -14,39 +15,38 @@ import {
 } from '@/lib/storage'
 
 function App() {
-	const [global, setGlobal] = useState(true)
-	const [quality, setQuality] = useState<AudioQuality>(DEFAULT_AUDIO_QUALITY)
-	const [videos, setVideos] = useState<Record<string, VideoSetting>>({})
+	const global = useSignal(true)
+	const quality = useSignal<AudioQuality>(DEFAULT_AUDIO_QUALITY)
+	const videos = useSignal<Record<string, VideoSetting>>({})
 
-	const refresh = useCallback(async () => {
+	async function refresh() {
 		const [g, q, v] = await Promise.all([
 			globalEnabled.getValue(),
 			audioQuality.getValue(),
 			listVideoSettings(),
 		])
-		setGlobal(g)
-		setQuality(q)
-		setVideos(v)
-	}, [])
+		global.value = g
+		quality.value = q
+		videos.value = v
+	}
 
+	// Mount-once load; refresh only writes stable signals.
 	useEffect(() => {
 		void refresh()
-	}, [refresh])
+	}, [])
 
-	const toggleGlobal = useCallback(async (value: boolean) => {
-		setGlobal(value)
+	async function toggleGlobal(value: boolean) {
+		global.value = value
 		await globalEnabled.setValue(value)
-	}, [])
+	}
 
-	const patchQuality = useCallback(async (partial: Partial<AudioQuality>) => {
-		setQuality((prev) => {
-			const next = { ...prev, ...partial }
-			void audioQuality.setValue(next)
-			return next
-		})
-	}, [])
+	async function patchQuality(partial: Partial<AudioQuality>) {
+		const next = { ...quality.value, ...partial }
+		quality.value = next
+		await audioQuality.setValue(next)
+	}
 
-	const videoIds = Object.keys(videos)
+	const videoIds = Object.keys(videos.value)
 
 	return (
 		<div className="options">
@@ -83,7 +83,7 @@ function App() {
 							<input
 								type="checkbox"
 								aria-label="Enable Modulate"
-								checked={global}
+								checked={global.value}
 								onChange={(e) => void toggleGlobal(e.currentTarget.checked)}
 							/>
 							<span className="toggle__track">
@@ -121,10 +121,10 @@ function App() {
 								min={0}
 								max={40}
 								step={1}
-								value={quality.overlapMs}
+								value={quality.value.overlapMs}
 								onChange={(e) => void patchQuality({ overlapMs: Number(e.currentTarget.value) })}
 							/>
-							<span className="quality-value">{quality.overlapMs}</span>
+							<span className="quality-value">{quality.value.overlapMs}</span>
 						</div>
 					</div>
 
@@ -137,7 +137,7 @@ function App() {
 							<input
 								type="checkbox"
 								aria-label="Quick seek"
-								checked={quality.quickSeek}
+								checked={quality.value.quickSeek}
 								onChange={(e) => void patchQuality({ quickSeek: e.currentTarget.checked })}
 							/>
 							<span className="toggle__track">
@@ -156,7 +156,7 @@ function App() {
 							className="num"
 							aria-label="Sequence (ms)"
 							min={0}
-							value={quality.sequenceMs}
+							value={quality.value.sequenceMs}
 							onChange={(e) => void patchQuality({ sequenceMs: Number(e.currentTarget.value) })}
 						/>
 					</div>
@@ -171,7 +171,7 @@ function App() {
 							className="num"
 							aria-label="Seek window (ms)"
 							min={0}
-							value={quality.seekWindowMs}
+							value={quality.value.seekWindowMs}
 							onChange={(e) => void patchQuality({ seekWindowMs: Number(e.currentTarget.value) })}
 						/>
 					</div>
@@ -210,7 +210,7 @@ function App() {
 						<>
 							<div className="vlist">
 								{videoIds.map((id) => {
-									const s = videos[id]
+									const s = videos.value[id]
 									const label = s.title ?? id
 									return (
 										<div className="vrow" key={id}>

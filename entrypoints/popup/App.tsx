@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'preact/hooks'
+import { useSignal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 
 import { Logo, PitchIcon, TempoIcon, ResetIcon, GearIcon } from '@/lib/icons'
 import type { PlayerState, PopupMessage } from '@/lib/messaging'
@@ -20,21 +21,22 @@ async function send(msg: PopupMessage): Promise<PlayerState | null> {
 }
 
 function App() {
-	const [state, setState] = useState<PlayerState | null>(null)
-	const [loading, setLoading] = useState(true)
+	const state = useSignal<PlayerState | null>(null)
+	const loading = useSignal(true)
 
+	// Mount-once load; signals are stable refs, so no deps.
 	useEffect(() => {
 		send({ type: 'GET_STATE' })
-			.then(setState)
-			.finally(() => setLoading(false))
+			.then((s) => (state.value = s))
+			.finally(() => (loading.value = false))
 	}, [])
 
-	const dispatch = useCallback(async (msg: PopupMessage) => {
+	async function dispatch(msg: PopupMessage) {
 		const s = await send(msg)
-		if (s) setState(s)
-	}, [])
+		if (s) state.value = s
+	}
 
-	if (loading) {
+	if (loading.value) {
 		return (
 			<div className="popup">
 				<div className="state">
@@ -51,9 +53,10 @@ function App() {
 		)
 	}
 
-	const onYouTube = state?.videoId != null
+	const s = state.value
+	const onYouTube = s?.videoId != null
 
-	if (!state || !onYouTube) {
+	if (!s || !onYouTube) {
 		return (
 			<div className="popup">
 				<div className="state">
@@ -67,7 +70,7 @@ function App() {
 		)
 	}
 
-	const controlsDisabled = !state.globalEnabled || !state.enabled
+	const controlsDisabled = !s.globalEnabled || !s.enabled
 
 	return (
 		<div className="popup">
@@ -82,11 +85,11 @@ function App() {
 					</span>
 				</div>
 				<div className="topbar__right">
-					<span className={`master-state${state.globalEnabled ? ' master-state--on' : ''}`}>
-						{state.globalEnabled ? 'On' : 'Off'}
+					<span className={`master-state${s.globalEnabled ? ' master-state--on' : ''}`}>
+						{s.globalEnabled ? 'On' : 'Off'}
 					</span>
 					<Toggle
-						checked={state.globalEnabled}
+						checked={s.globalEnabled}
 						aria-label="Master switch"
 						onChange={(enabled) => dispatch({ type: 'SET_GLOBAL_ENABLED', enabled })}
 					/>
@@ -94,14 +97,14 @@ function App() {
 			</header>
 
 			<main className="body">
-				{!state.globalEnabled && (
+				{!s.globalEnabled && (
 					<p className="paused">Modulate is off. Flip the switch to start tuning audio.</p>
 				)}
 
 				<ControlRow
 					label="Pitch"
 					icon={<PitchIcon />}
-					value={state.semitones}
+					value={s.semitones}
 					min={MIN_SEMITONES}
 					max={MAX_SEMITONES}
 					step={1}
@@ -123,7 +126,7 @@ function App() {
 				<ControlRow
 					label="Tempo"
 					icon={<TempoIcon />}
-					value={state.tempo}
+					value={s.tempo}
 					min={MIN_TEMPO}
 					max={MAX_TEMPO}
 					step={TEMPO_STEP}
@@ -142,14 +145,14 @@ function App() {
 
 				<div className="divider" />
 
-				<div className={`vid${!state.globalEnabled ? ' vid--disabled' : ''}`}>
+				<div className={`vid${!s.globalEnabled ? ' vid--disabled' : ''}`}>
 					<span className="vid__text">
 						<span className="vid__label">This video</span>
 						<span className="vid__desc">Apply saved pitch &amp; tempo here</span>
 					</span>
 					<Toggle
-						checked={state.enabled}
-						disabled={!state.globalEnabled}
+						checked={s.enabled}
+						disabled={!s.globalEnabled}
 						aria-label="Enable for this video"
 						onChange={(enabled) => dispatch({ type: 'SET_VIDEO_ENABLED', enabled })}
 					/>

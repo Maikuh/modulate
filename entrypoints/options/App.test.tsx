@@ -1,6 +1,6 @@
 import { render, within, waitFor } from '@testing-library/preact'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 
 import {
@@ -13,7 +13,11 @@ import {
 
 import App from './App'
 
-beforeEach(() => fakeBrowser.reset())
+beforeEach(() => {
+	fakeBrowser.reset()
+	// fakeBrowser has no getManifest; the header reads .version off it.
+	vi.spyOn(browser.runtime, 'getManifest').mockReturnValue({ version: '0.0.0' } as any)
+})
 
 // WxtVitest runs without DOM isolation; scope queries to this render's container.
 // The styled toggles render bare checkboxes with no accessible name; within a
