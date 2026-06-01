@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, within } from '@testing-library/react';
+import { render, within } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { Toggle } from './Toggle';
 
 // Scope queries to this render's container — WxtVitest runs without DOM isolation.
 function setup(props: Parameters<typeof Toggle>[0]) {
-  return within(render(<Toggle {...props} />).container);
+  return within(render(<Toggle {...props} />).container as HTMLElement);
 }
 
 describe('Toggle', () => {

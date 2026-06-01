@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, within, waitFor } from '@testing-library/react';
+import { render, within, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import {
@@ -18,7 +18,7 @@ beforeEach(() => fakeBrowser.reset());
 // single App the only two are, in order, the global "Enable Modulate" switch and
 // the "Quick seek" quality toggle.
 function renderApp() {
-  const view = within(render(<App />).container);
+  const view = within(render(<App />).container as HTMLElement);
   return {
     view,
     globalSwitch: () => view.getAllByRole('checkbox')[0],

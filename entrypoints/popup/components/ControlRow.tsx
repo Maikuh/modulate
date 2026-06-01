@@ -1,17 +1,17 @@
-import type { ReactNode } from 'react';
+import type { ComponentChildren } from 'preact';
 import { Slider } from './Slider';
 import { ResetIcon } from '@/lib/icons';
 
 interface ControlRowProps {
   label: string;
-  icon: ReactNode;
+  icon: ComponentChildren;
   value: number;
   min: number;
   max: number;
   step: number;
   /** Value the control returns to; the reset affordance shows only when away from it. */
   resetValue: number;
-  displayValue: (v: number) => ReactNode;
+  displayValue: (v: number) => ComponentChildren;
   onStep: (delta: number) => void;
   onSet: (value: number) => void;
   onReset: () => void;

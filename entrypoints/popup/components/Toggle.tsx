@@ -13,7 +13,7 @@ export function Toggle({ checked, onChange, disabled, 'aria-label': ariaLabel }:
         checked={checked}
         disabled={disabled}
         aria-label={ariaLabel}
-        onChange={(e) => onChange(e.target.checked)}
+        onChange={(e) => onChange(e.currentTarget.checked)}
       />
       <span className="toggle__track">
         <span className="toggle__thumb" />

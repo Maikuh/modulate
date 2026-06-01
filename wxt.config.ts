@@ -1,8 +1,10 @@
 import { defineConfig } from 'wxt';
+import preact from '@preact/preset-vite';
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
-  modules: ['@wxt-dev/module-react', '@wxt-dev/auto-icons'],
+  modules: ['@wxt-dev/auto-icons'],
+  vite: () => ({ plugins: [preact()] }),
   manifest: {
     name: 'Modulate',
     description: 'Transpose YouTube video audio in semitones, per video.',

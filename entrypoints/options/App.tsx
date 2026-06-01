@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'preact/hooks';
 import {
   globalEnabled,
   audioQuality,
@@ -82,7 +82,7 @@ function App() {
               <input
                 type="checkbox"
                 checked={global}
-                onChange={(e) => void toggleGlobal(e.target.checked)}
+                onChange={(e) => void toggleGlobal(e.currentTarget.checked)}
               />
               <span className="toggle__track">
                 <span className="toggle__thumb" />
@@ -119,7 +119,7 @@ function App() {
                 max={40}
                 step={1}
                 value={quality.overlapMs}
-                onChange={(e) => void patchQuality({ overlapMs: Number(e.target.value) })}
+                onChange={(e) => void patchQuality({ overlapMs: Number(e.currentTarget.value) })}
               />
               <span className="quality-value">{quality.overlapMs}</span>
             </div>
@@ -134,7 +134,7 @@ function App() {
               <input
                 type="checkbox"
                 checked={quality.quickSeek}
-                onChange={(e) => void patchQuality({ quickSeek: e.target.checked })}
+                onChange={(e) => void patchQuality({ quickSeek: e.currentTarget.checked })}
               />
               <span className="toggle__track">
                 <span className="toggle__thumb" />
@@ -152,7 +152,7 @@ function App() {
               className="num"
               min={0}
               value={quality.sequenceMs}
-              onChange={(e) => void patchQuality({ sequenceMs: Number(e.target.value) })}
+              onChange={(e) => void patchQuality({ sequenceMs: Number(e.currentTarget.value) })}
             />
           </div>
 
@@ -166,7 +166,7 @@ function App() {
               className="num"
               min={0}
               value={quality.seekWindowMs}
-              onChange={(e) => void patchQuality({ seekWindowMs: Number(e.target.value) })}
+              onChange={(e) => void patchQuality({ seekWindowMs: Number(e.currentTarget.value) })}
             />
           </div>
 

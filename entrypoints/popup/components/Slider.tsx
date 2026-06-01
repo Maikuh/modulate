@@ -17,7 +17,7 @@ export function Slider({ value, min, max, step, onSet, disabled }: SliderProps) 
       max={max}
       step={step}
       disabled={disabled}
-      onChange={(e) => onSet(Number(e.target.value))}
+      onChange={(e) => onSet(Number(e.currentTarget.value))}
     />
   );
 }

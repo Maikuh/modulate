@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, within, waitFor } from '@testing-library/react';
+import { render, within, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import type { PlayerState, PopupMessage } from '@/lib/messaging';
@@ -25,7 +25,7 @@ function mockTabs(state: PlayerState | null) {
 
 // WxtVitest runs without DOM isolation; scope queries to this render's container.
 function renderApp() {
-  return within(render(<App />).container);
+  return within(render(<App />).container as HTMLElement);
 }
 
 beforeEach(() => {

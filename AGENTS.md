@@ -4,7 +4,7 @@ This file provides guidance to agents when working with code in this repository.
 
 ## What this is
 
-Modulate is a browser extension (WXT + React 19) that transposes YouTube video audio by semitones (±12) **and** time-stretches playback speed (0.5×–2×, pitch held constant), per video. State persists in `chrome.storage.local` keyed by YouTube video ID. UI is a popup (live controls) plus an options page (audio-quality knobs + saved-video management). Keyboard `commands` and a toolbar badge are driven by the background script. See `ROADMAP.md` for planned work (in-player controls, `sync` storage).
+Modulate is a browser extension (WXT + Preact) that transposes YouTube video audio by semitones (±12) **and** time-stretches playback speed (0.5×–2×, pitch held constant), per video. State persists in `chrome.storage.local` keyed by YouTube video ID. UI is a popup (live controls) plus an options page (audio-quality knobs + saved-video management). Keyboard `commands` and a toolbar badge are driven by the background script. See `ROADMAP.md` for planned work (in-player controls, `sync` storage).
 
 ## Commands
 
@@ -24,7 +24,7 @@ There is no test suite. Verify changes by loading the unpacked build and exercis
 The core constraint driving the whole design: the Web Audio graph **must run in the page's MAIN world**, not the content-script sandbox. Firefox throws `DataCloneError` when an `AudioWorkletNode` serializes a sandbox-created object into the page-realm worklet. So responsibilities are split across three realms (popup→content and content→injected are the two hops; the background script is a side actor for shortcuts + badge):
 
 ```
-popup (React)  --PopupMessage-->  content script  --ApplyMessage (JSON string)-->  injected (MAIN world)
+popup (Preact) --PopupMessage-->  content script  --ApplyMessage (JSON string)-->  injected (MAIN world)
                 browser.tabs       |   ^                window.postMessage
                 .sendMessage       |   | PopupMessage (keyboard commands) /
                                    |   | BadgeMessage (effective state)

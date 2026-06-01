@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent, within } from '@testing-library/react';
+import { render, fireEvent, within } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { ControlRow } from './ControlRow';
 
@@ -20,7 +20,7 @@ function setup(overrides: Partial<Parameters<typeof ControlRow>[0]> = {}) {
     onReset: vi.fn(),
     ...overrides,
   };
-  const view = within(render(<ControlRow {...props} />).container);
+  const view = within(render(<ControlRow {...props} />).container as HTMLElement);
   return {
     props,
     view,
