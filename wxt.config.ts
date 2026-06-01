@@ -5,10 +5,17 @@ import { defineConfig } from 'wxt'
 export default defineConfig({
 	modules: ['@wxt-dev/auto-icons'],
 	vite: () => ({ plugins: [preact()] }),
-	manifest: {
+	manifest: ({ browser }) => ({
 		name: 'Modulate',
 		description: 'Transpose YouTube video audio in semitones, per video.',
 		permissions: ['storage'],
+		// Firefox (AMO) requires a data-collection disclosure. Modulate stores
+		// settings only in local storage and transmits nothing → "none".
+		...(browser === 'firefox' && {
+			browser_specific_settings: {
+				gecko: { data_collection_permissions: { required: ['none'] } },
+			},
+		}),
 		commands: {
 			'modulate-pitch-up': {
 				suggested_key: { default: 'Ctrl+Shift+Up' },
@@ -33,5 +40,5 @@ export default defineConfig({
 				matches: ['*://*.youtube.com/*'],
 			},
 		],
-	},
+	}),
 })

@@ -60,6 +60,41 @@ Tests cover unit logic and Testing Library component specs. They do **not** exer
 live audio graph or the cross-realm message flow — verify those by loading the unpacked
 build and exercising the popup and options page on a real YouTube watch page.
 
+## Release
+
+Releases to the Chrome Web Store and Firefox Add-ons are automated by the
+[`Release` workflow](.github/workflows/release.yml) — pushing a `v*` tag zips both
+targets, submits them via [`wxt submit`](https://wxt.dev/guide/essentials/publishing.html),
+and cuts a GitHub Release with auto-generated notes and the ZIPs attached.
+
+One-time setup:
+
+1. `bunx wxt submit init` — interactive walkthrough that writes credentials to a local,
+   git-ignored `.env.submit`.
+2. Add the resulting values as repo secrets (Settings → Secrets and variables → Actions):
+   `CHROME_EXTENSION_ID`, `CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`,
+   `CHROME_REFRESH_TOKEN`, `FIREFOX_EXTENSION_ID`, `FIREFOX_JWT_ISSUER`,
+   `FIREFOX_JWT_SECRET`.
+3. The extension must already exist in both stores — `wxt submit` updates a listing, it
+   can't create the first one.
+
+To ship a release, bump `version` in `package.json` (WXT reads it into the manifest),
+commit, then push a matching tag:
+
+```sh
+git tag v0.1.0 && git push --tags
+```
+
+Dry-run locally first (uses `.env.submit`) to check auth without uploading:
+
+```sh
+bun run zip && bun run zip:firefox
+bunx wxt submit --dry-run \
+  --chrome-zip .output/*-chrome.zip \
+  --firefox-zip .output/*-firefox.zip \
+  --firefox-sources-zip .output/*-sources.zip
+```
+
 ## How it works
 
 The Web Audio graph must run in the page's **MAIN world**, not the content-script
