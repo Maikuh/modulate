@@ -207,6 +207,7 @@ function App() {
 						<>
 							{videoIds.map((id) => {
 								const s = videos[id]
+								const label = s.title ?? id
 								return (
 									<div className="vrow" key={id}>
 										<a
@@ -214,8 +215,8 @@ function App() {
 											href={`https://www.youtube.com/watch?v=${id}`}
 											target="_blank"
 											rel="noreferrer"
-											title={id}
-											aria-label={`Open ${id} on YouTube`}
+											title={label}
+											aria-label={`Open ${label} on YouTube`}
 										>
 											<img
 												className="vrow__thumb"
@@ -227,7 +228,7 @@ function App() {
 												}}
 											/>
 											<div className="vrow__info">
-												<span className="vrow__id">{id}</span>
+												<span className="vrow__id">{label}</span>
 												<div className="vrow__chips">
 													<span className="chip">{formatSemitones(s.semitones)} st</span>
 													<span className="chip">{s.tempo.toFixed(2)}×</span>

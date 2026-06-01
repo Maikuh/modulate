@@ -13,6 +13,12 @@ export interface VideoSetting {
 	semitones: number
 	/** Playback rate (1 = original speed); pitch is held constant. */
 	tempo: number
+	/**
+	 * Human-readable video title, captured from the watch page at save time so
+	 * the options list is readable. Optional: legacy entries (and any saved
+	 * before the title resolved) fall back to the video ID.
+	 */
+	title?: string
 }
 
 export const DEFAULT_VIDEO_SETTING: VideoSetting = {
@@ -72,10 +78,13 @@ export async function setVideoSetting(
 	partial: Partial<VideoSetting>,
 ): Promise<VideoSetting> {
 	const all = await videoSettings.getValue()
+	// Drop `undefined` fields so a partial can't blank out a stored value (e.g. a
+	// null title before the watch metadata mounts must not erase a saved one).
+	const defined = Object.fromEntries(Object.entries(partial).filter(([, v]) => v !== undefined))
 	const next: VideoSetting = {
 		...DEFAULT_VIDEO_SETTING,
 		...all[videoId],
-		...partial,
+		...defined,
 	}
 	await videoSettings.setValue({ ...all, [videoId]: next })
 	return next

@@ -11,7 +11,7 @@ import {
 	clampTempo,
 	DEFAULT_VIDEO_SETTING,
 } from '@/lib/storage'
-import { getVideoId } from '@/lib/youtube'
+import { getVideoId, getVideoTitle } from '@/lib/youtube'
 
 export default defineContentScript({
 	matches: ['*://*.youtube.com/*'],
@@ -105,38 +105,41 @@ export default defineContentScript({
 
 		async function handle(msg: PopupMessage): Promise<PlayerState> {
 			const videoId = getVideoId(location.href)
+			// Capture the readable title alongside any save so the options list is
+			// legible. `?? undefined` so a null title doesn't clobber a stored one.
+			const title = getVideoTitle() ?? undefined
 
 			switch (msg.type) {
 				case 'SET_SEMITONES':
 					if (videoId) {
-						await setVideoSetting(videoId, { semitones: clampSemitones(msg.semitones) })
+						await setVideoSetting(videoId, { semitones: clampSemitones(msg.semitones), title })
 					}
 					break
 				case 'NUDGE_SEMITONES':
 					if (videoId) {
 						const current = await getRawVideoSetting(videoId)
 						const from = current?.semitones ?? 0
-						await setVideoSetting(videoId, { semitones: clampSemitones(from + msg.delta) })
+						await setVideoSetting(videoId, { semitones: clampSemitones(from + msg.delta), title })
 					}
 					break
 				case 'SET_TEMPO':
-					if (videoId) await setVideoSetting(videoId, { tempo: clampTempo(msg.tempo) })
+					if (videoId) await setVideoSetting(videoId, { tempo: clampTempo(msg.tempo), title })
 					break
 				case 'NUDGE_TEMPO':
 					if (videoId) {
 						const current = await getRawVideoSetting(videoId)
 						const from = current?.tempo ?? 1
-						await setVideoSetting(videoId, { tempo: clampTempo(from + msg.delta) })
+						await setVideoSetting(videoId, { tempo: clampTempo(from + msg.delta), title })
 					}
 					break
 				case 'SET_VIDEO_ENABLED':
-					if (videoId) await setVideoSetting(videoId, { enabled: msg.enabled })
+					if (videoId) await setVideoSetting(videoId, { enabled: msg.enabled, title })
 					break
 				case 'SET_GLOBAL_ENABLED':
 					await globalEnabled.setValue(msg.enabled)
 					break
 				case 'RESET':
-					if (videoId) await setVideoSetting(videoId, { ...DEFAULT_VIDEO_SETTING })
+					if (videoId) await setVideoSetting(videoId, { ...DEFAULT_VIDEO_SETTING, title })
 					break
 				case 'GET_STATE':
 					break

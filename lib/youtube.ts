@@ -14,3 +14,27 @@ export function getVideoId(url: string): string | null {
 		return null
 	}
 }
+
+/**
+ * Read the current video's human-readable title from the watch-page DOM.
+ *
+ * Prefers the `<meta name="title">` tag (clean, no suffix). Falls back to the
+ * watch metadata `<h1>`, then `document.title` with YouTube's
+ * `(unread-count) Title - YouTube` decoration stripped. Returns `null` when no
+ * usable title is found (e.g. before the metadata mounts on SPA nav).
+ */
+export function getVideoTitle(): string | null {
+	const meta = document.querySelector<HTMLMetaElement>('meta[name="title"]')?.content?.trim()
+	if (meta) return meta
+
+	const h1 = document
+		.querySelector<HTMLElement>('ytd-watch-metadata h1, #title h1')
+		?.textContent?.trim()
+	if (h1) return h1
+
+	const fromTitle = document.title
+		.replace(/^\(\d+\)\s*/, '')
+		.replace(/\s*-\s*YouTube\s*$/, '')
+		.trim()
+	return fromTitle || null
+}

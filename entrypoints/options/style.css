@@ -214,7 +214,6 @@ body {
 	min-width: 0;
 }
 .vrow__id {
-	font-family: var(--font-mono);
 	font-size: 13px;
 	font-weight: 600;
 	letter-spacing: -0.01em;
