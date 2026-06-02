@@ -63,6 +63,8 @@ These are load-bearing; violating them mutes audio or throws:
 
 WXT storage items: `local:globalEnabled` (master switch), `local:videoSettings` (a single `Record<videoId, VideoSetting>` object, where `VideoSetting` is `{ enabled, semitones, tempo }`), and `local:audioQuality` (shared WSOLA knobs). `resolveSetting(global, video)` is the single source of truth for what gets applied: the no-op (`{ semitones: 0, tempo: 1 }`) when the global switch is off, no per-video entry exists, or that entry is disabled; otherwise the entry's values. Clamp ranges: `MIN/MAX_SEMITONES` (±12) and `MIN/MAX_TEMPO` (0.5×–2×, snapped to `TEMPO_STEP`). Note: `videoSettings` grows unbounded — there is no pruning yet (see ROADMAP).
 
-## `public/soundtouch-processor.js` — do not hand-edit
+## `soundtouch-processor.js` — copied from the dependency at build
 
-This is the bundled `@soundtouchjs/audio-worklet` AudioWorklet processor (SoundTouch WSOLA time-stretch + Lanczos-interpolated rate transpose). It is a generated artifact loaded as a web-accessible resource. Replace it by updating the dependency, not by editing it. New web-accessible resources for the page must be registered in `wxt.config.ts` under `web_accessible_resources`.
+The AudioWorklet processor (SoundTouch WSOLA time-stretch + Lanczos-interpolated rate transpose) is **not** committed. `modules/copy-soundtouch-processor.ts` (a WXT module) copies it from `@soundtouchjs/audio-worklet/processor` into the build output as `soundtouch-processor.js` via the `build:publicAssets` hook, and registers the path with `prepare:publicPaths` so `browser.runtime.getURL('/soundtouch-processor.js')` stays typed. Upgrade it by bumping the dependency — never hand-edit the generated processor.
+
+Why a build copy and not a Vite `?url` import: WXT inlines `?url` assets as a `data:` URI, and the worklet loads in YouTube's MAIN world where the page CSP would govern (and can block) a `data:` module. A `chrome-extension://` web-accessible file sidesteps that. New web-accessible resources for the page must be registered in `wxt.config.ts` under `web_accessible_resources`.
