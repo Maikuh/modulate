@@ -19,7 +19,8 @@
 		"format:check": "oxfmt --check",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"postinstall": "wxt prepare"
+		"postinstall": "wxt prepare",
+		"postversion": "git push --follow-tags"
 	},
 	"dependencies": {
 		"@preact/signals": "^2.9.1",
