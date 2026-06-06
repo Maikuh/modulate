@@ -95,6 +95,7 @@ export default defineContentScript({
 			// Tell the background to render the toolbar badge for this tab.
 			const badge: BadgeMessage = {
 				type: 'MODULATE_BADGE',
+				onVideo: videoId != null,
 				semitones: resolved.semitones,
 				tempo: resolved.tempo,
 			}

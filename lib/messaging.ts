@@ -24,6 +24,8 @@ export type PopupMessage =
 /** Sent from the content script to the background script to drive the toolbar badge. */
 export interface BadgeMessage {
 	type: 'MODULATE_BADGE'
+	/** Whether the sending tab is on a watchable video (drives the toolbar icon). */
+	onVideo: boolean
 	/** Effective semitones currently applied in the sending tab. */
 	semitones: number
 	/** Effective tempo currently applied in the sending tab. */

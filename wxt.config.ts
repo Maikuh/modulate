@@ -9,6 +9,17 @@ export default defineConfig({
 		name: 'Modulate',
 		description: 'Transpose YouTube video audio in semitones, per video.',
 		permissions: ['storage'],
+		// Grayscale toolbar icon by default; the background script swaps in the
+		// colored set per tab while on a video (see entrypoints/background.ts). The
+		// disabled set is produced by modules/generate-disabled-icons.ts.
+		action: {
+			default_icon: {
+				16: 'icons-disabled/16.png',
+				32: 'icons-disabled/32.png',
+				48: 'icons-disabled/48.png',
+				128: 'icons-disabled/128.png',
+			},
+		},
 		// Firefox (AMO) requires a data-collection disclosure. Modulate stores
 		// settings only in local storage and transmits nothing → "none".
 		...(browser === 'firefox' && {
