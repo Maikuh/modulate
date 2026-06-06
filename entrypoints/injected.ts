@@ -87,8 +87,6 @@ export default defineUnlistedScript(() => {
 		audioEngine.applyQuality({
 			overlapMs: msg.overlapMs,
 			quickSeek: msg.quickSeek,
-			sequenceMs: msg.sequenceMs,
-			seekWindowMs: msg.seekWindowMs,
 		})
 		await audioEngine.ensureGraph(el, msg.processorUrl)
 		audioEngine.applyTempo(msg.tempo)

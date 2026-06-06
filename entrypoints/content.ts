@@ -87,8 +87,6 @@ export default defineContentScript({
 				tempo: resolved.tempo,
 				overlapMs: quality.overlapMs,
 				quickSeek: quality.quickSeek,
-				sequenceMs: quality.sequenceMs,
-				seekWindowMs: quality.seekWindowMs,
 			}
 			// JSON string payload: primitives cross the content/page membrane without
 			// `cloneInto`; a raw object would arrive as `null` in the page realm.

@@ -165,28 +165,6 @@ body {
 	border-radius: var(--radius-sm);
 }
 
-.num {
-	width: 86px;
-	padding: 8px 11px;
-	font-family: var(--font-mono);
-	font-size: 13px;
-	font-weight: 600;
-	font-variant-numeric: tabular-nums;
-	text-align: right;
-	color: var(--text);
-	background: var(--surface-2);
-	border: 1px solid var(--border-strong);
-	border-radius: var(--radius-sm);
-	transition: border-color 0.15s;
-}
-.num:focus-visible {
-	outline: none;
-	border-color: var(--accent);
-}
-.num::-webkit-inner-spin-button {
-	opacity: 0.5;
-}
-
 /* ── Saved video rows ───────────────────────────────── */
 .vlist {
 	max-height: 360px;

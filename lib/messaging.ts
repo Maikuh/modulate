@@ -46,8 +46,6 @@ export interface ApplyMessage {
 	/** WSOLA time-stretch tuning for the worklet. */
 	overlapMs: number
 	quickSeek: boolean
-	sequenceMs: number
-	seekWindowMs: number
 }
 
 /** Snapshot returned to the popup so it can render the current state. */

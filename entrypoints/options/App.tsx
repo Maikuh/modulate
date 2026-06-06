@@ -103,7 +103,7 @@ function App() {
 						<h2 className="o-section__title">Audio Quality</h2>
 						<p className="o-section__desc">
 							WSOLA time-stretch tuning. Higher overlap reduces artifacts at extreme shifts but
-							costs CPU. Use 0 for auto-calculated timing.
+							costs CPU. Window timing is auto-calculated.
 						</p>
 					</div>
 				</div>
@@ -144,36 +144,6 @@ function App() {
 								<span className="toggle__thumb" />
 							</span>
 						</label>
-					</div>
-
-					<div className="row">
-						<div className="row__text">
-							<span className="row__label">Sequence (ms)</span>
-							<span className="row__desc">Window length. 0 = auto.</span>
-						</div>
-						<input
-							type="number"
-							className="num"
-							aria-label="Sequence (ms)"
-							min={0}
-							value={quality.value.sequenceMs}
-							onChange={(e) => void patchQuality({ sequenceMs: Number(e.currentTarget.value) })}
-						/>
-					</div>
-
-					<div className="row">
-						<div className="row__text">
-							<span className="row__label">Seek window (ms)</span>
-							<span className="row__desc">Search range for best overlap. 0 = auto.</span>
-						</div>
-						<input
-							type="number"
-							className="num"
-							aria-label="Seek window (ms)"
-							min={0}
-							value={quality.value.seekWindowMs}
-							onChange={(e) => void patchQuality({ seekWindowMs: Number(e.currentTarget.value) })}
-						/>
 					</div>
 
 					<div className="row">
