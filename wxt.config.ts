@@ -13,7 +13,10 @@ export default defineConfig({
 		// settings only in local storage and transmits nothing → "none".
 		...(browser === 'firefox' && {
 			browser_specific_settings: {
-				gecko: { data_collection_permissions: { required: ['none'] } },
+				gecko: {
+					id: 'modulate@maikuh',
+					data_collection_permissions: { required: ['none'] },
+				},
 			},
 		}),
 		commands: {
