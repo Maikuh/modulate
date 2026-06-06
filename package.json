@@ -1,6 +1,6 @@
 {
 	"name": "modulate",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"private": true,
 	"description": "Browser extension that transposes YouTube audio by semitones and time-stretches playback speed (pitch held constant), per video.",
 	"license": "GPL-3.0-only",
