@@ -1,4 +1,3 @@
-import { formatSemitones } from '@/lib/format'
 import type { BadgeMessage, PopupMessage } from '@/lib/messaging'
 import { TEMPO_STEP } from '@/lib/storage'
 
@@ -35,8 +34,9 @@ export default defineBackground(() => {
 		const tabId = sender.tab?.id
 		if (tabId == null || !action) return
 
+		// Badge stays compact: negative pitch keeps its `-`, positive drops the `+`.
 		const text =
-			message.semitones !== 0 ? formatSemitones(message.semitones) : message.tempo !== 1 ? '♪' : ''
+			message.semitones !== 0 ? String(message.semitones) : message.tempo !== 1 ? '♪' : ''
 		action.setBadgeText({ tabId, text })
 		action.setBadgeBackgroundColor?.({ tabId, color: ACCENT })
 	})
