@@ -105,7 +105,7 @@ export default defineContentScript({
 			const videoId = getVideoId(location.href)
 			// Capture the readable title alongside any save so the options list is
 			// legible. `?? undefined` so a null title doesn't clobber a stored one.
-			const title = getVideoTitle() ?? undefined
+			const title = getVideoTitle(videoId) ?? undefined
 
 			switch (msg.type) {
 				case 'SET_SEMITONES':
