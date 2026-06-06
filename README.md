@@ -9,6 +9,14 @@ Built with [WXT](https://wxt.dev) + [Preact](https://preactjs.com), using
 [`@soundtouchjs/audio-worklet`](https://github.com/cutterbl/SoundTouchJS) (SoundTouch
 WSOLA time-stretch + Lanczos-interpolated rate transpose) for the audio processing.
 
+<!-- <a href="https://www.buymeacoffee.com/maikuh" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-orange.png" alt="Buy Me a Coffee" style="height: 48px !important;width: 198px !important;" ></a> -->
+
+## Install
+
+- **Firefox** — [Modulate on Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/modulate/)
+- **Chrome** — Soon…
+- **Safari** — Requires active Apple Developer Account (100$), not gonna be anytime soon, but donations welcome (soon)
+
 ## Features
 
 - **Pitch transpose** — shift audio ±12 semitones without changing speed.
