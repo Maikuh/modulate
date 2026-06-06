@@ -25,7 +25,7 @@ export default defineConfig({
 		...(browser === 'firefox' && {
 			browser_specific_settings: {
 				gecko: {
-					id: 'modulate@maikuh',
+					id: '{3c1ab0b8-276b-4fb7-a0ad-08b79df38358}',
 					data_collection_permissions: { required: ['none'] },
 				},
 			},
