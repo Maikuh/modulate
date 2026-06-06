@@ -20,5 +20,5 @@ export interface AudioQuality {
 /** Defaults mirror the values the audio engine used to hardcode. */
 export const DEFAULT_AUDIO_QUALITY: AudioQuality = {
 	overlapMs: 12,
-	quickSeek: false,
+	quickSeek: true,
 }

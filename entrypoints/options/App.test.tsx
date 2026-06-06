@@ -48,9 +48,9 @@ describe('options App', () => {
 
 	it('persists a quality knob edit', async () => {
 		const { quickSeekSwitch } = renderApp()
-		await waitFor(() => expect(quickSeekSwitch()).not.toBeChecked())
+		await waitFor(() => expect(quickSeekSwitch()).toBeChecked())
 		await userEvent.click(quickSeekSwitch())
-		await waitFor(async () => expect((await audioQuality.getValue()).quickSeek).toBe(true))
+		await waitFor(async () => expect((await audioQuality.getValue()).quickSeek).toBe(false))
 	})
 
 	it('shows the empty state when no videos are saved', async () => {
@@ -78,9 +78,9 @@ describe('options App', () => {
 	})
 
 	it('restores quality defaults', async () => {
-		await audioQuality.setValue({ ...DEFAULT_AUDIO_QUALITY, quickSeek: true })
+		await audioQuality.setValue({ ...DEFAULT_AUDIO_QUALITY, quickSeek: false })
 		const { view, quickSeekSwitch } = renderApp()
-		await waitFor(() => expect(quickSeekSwitch()).toBeChecked())
+		await waitFor(() => expect(quickSeekSwitch()).not.toBeChecked())
 		await userEvent.click(view.getByRole('button', { name: /restore/i }))
 		await waitFor(async () => expect(await audioQuality.getValue()).toEqual(DEFAULT_AUDIO_QUALITY))
 	})
