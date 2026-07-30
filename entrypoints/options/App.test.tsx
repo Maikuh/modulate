@@ -19,16 +19,15 @@ beforeEach(() => {
 	vi.spyOn(browser.runtime, 'getManifest').mockReturnValue({ version: '0.0.0' } as any)
 })
 
-// WxtVitest runs without DOM isolation; scope queries to this render's container.
-// The styled toggles render bare checkboxes with no accessible name; within a
-// single App the only two are, in order, the global "Enable Modulate" switch and
-// the "Quick seek" quality toggle.
+// Scope queries to this render's container. Both toggles carry an `aria-label`,
+// so address them by name rather than by position — an index would silently
+// retarget to the wrong control the moment a checkbox is added above them.
 function renderApp() {
 	const view = within(render(<App />).container as HTMLElement)
 	return {
 		view,
-		globalSwitch: () => view.getAllByRole('checkbox')[0],
-		quickSeekSwitch: () => view.getAllByRole('checkbox')[1],
+		globalSwitch: () => view.getByLabelText('Enable Modulate'),
+		quickSeekSwitch: () => view.getByLabelText('Quick seek'),
 	}
 }
 
@@ -62,9 +61,28 @@ describe('options App', () => {
 		await setVideoSetting('vid1', { semitones: 3, tempo: 1.5 })
 		const { view } = renderApp()
 		expect(await view.findByText('vid1')).toBeInTheDocument()
-		await userEvent.click(view.getByLabelText('Remove'))
+		await userEvent.click(view.getByLabelText('Remove vid1'))
 		await waitFor(() => expect(view.queryByText('vid1')).not.toBeInTheDocument())
 		expect(await listVideoSettings()).toEqual({})
+	})
+
+	// Each row's delete button names its row, so a screen reader on a long list
+	// doesn't announce N identical "Remove" buttons.
+	it('gives each remove button a distinct accessible name', async () => {
+		await setVideoSetting('vid1', { title: 'First Song' })
+		await setVideoSetting('vid2', { title: 'Second Song' })
+		const { view } = renderApp()
+		expect(await view.findByLabelText('Remove First Song')).toBeInTheDocument()
+		expect(view.getByLabelText('Remove Second Song')).toBeInTheDocument()
+	})
+
+	// The popup writes the same storage, so an open options page must not keep
+	// showing a master switch position that another surface has since changed.
+	it('reflects a global switch change made elsewhere', async () => {
+		const { globalSwitch } = renderApp()
+		await waitFor(() => expect(globalSwitch()).toBeChecked())
+		await globalEnabled.setValue(false)
+		await waitFor(() => expect(globalSwitch()).not.toBeChecked())
 	})
 
 	it('clears all saved videos', async () => {

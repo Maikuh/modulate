@@ -10,12 +10,22 @@ import { Toggle } from './components/Toggle'
 
 /** Send a message to the content script in the active tab; null if none responds. */
 async function send(msg: PopupMessage): Promise<PlayerState | null> {
-	const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+	let tab
+	try {
+		;[tab] = await browser.tabs.query({ active: true, currentWindow: true })
+	} catch (err) {
+		console.error('[modulate] could not read the active tab', err)
+		return null
+	}
 	if (tab?.id == null) return null
 	try {
 		return (await browser.tabs.sendMessage(tab.id, msg)) as PlayerState
-	} catch {
-		// No content script in this tab (not a YouTube page).
+	} catch (err) {
+		// Usually "not a YouTube page". But the same rejection covers a YouTube tab
+		// that predates an extension install or reload and so has no content script
+		// yet — there the empty state below tells the user to open a YouTube video
+		// while they are already looking at one, and only a tab reload fixes it.
+		console.debug('[modulate] no content script in the active tab', tab.url, err)
 		return null
 	}
 }
@@ -28,6 +38,9 @@ function App() {
 	useEffect(() => {
 		send({ type: 'GET_STATE' })
 			.then((s) => (state.value = s))
+			// `send` already handles its own failures, but a throw here would leave the
+			// popup stuck on the loading dots forever with nothing logged.
+			.catch((err) => console.error('[modulate] popup state load failed', err))
 			.finally(() => (loading.value = false))
 	}, [])
 

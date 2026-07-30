@@ -244,6 +244,17 @@ body {
 }
 
 /* ── Empty state ────────────────────────────────────── */
+.o-error {
+	margin: 0 0 4px;
+	padding: 10px 14px;
+	border: 1px solid color-mix(in srgb, #ef4444 40%, transparent);
+	border-radius: 8px;
+	background: color-mix(in srgb, #ef4444 12%, transparent);
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text);
+}
+
 .o-empty {
 	display: flex;
 	flex-direction: column;

@@ -17,8 +17,20 @@ export interface AudioQuality {
 	quickSeek: boolean
 }
 
-/** Defaults mirror the values the audio engine used to hardcode. */
 export const DEFAULT_AUDIO_QUALITY: AudioQuality = {
 	overlapMs: 12,
 	quickSeek: true,
+}
+
+/**
+ * Range for the overlap slider. The floor is 1, not 0: SoundTouch guards
+ * `overlapMs > 0` and silently keeps its previous value otherwise, so a stored 0
+ * would render in the options page as an applied setting the DSP never took.
+ */
+export const MIN_OVERLAP_MS = 1
+export const MAX_OVERLAP_MS = 40
+
+export function clampOverlapMs(n: number): number {
+	if (!Number.isFinite(n)) return DEFAULT_AUDIO_QUALITY.overlapMs
+	return Math.max(MIN_OVERLAP_MS, Math.min(MAX_OVERLAP_MS, Math.round(n)))
 }
