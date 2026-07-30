@@ -7,8 +7,6 @@ import {
 	getRawVideoSetting,
 	setVideoSetting,
 	resolveSetting,
-	clampSemitones,
-	clampTempo,
 	DEFAULT_VIDEO_SETTING,
 } from '@/lib/storage'
 import { getVideoId, getVideoTitle } from '@/lib/youtube'
@@ -42,17 +40,22 @@ export default defineContentScript({
 		})
 		injected.catch((err) => console.error('[modulate]', err))
 
-		/** Read the state the popup needs to render the controls. */
-		async function getState(): Promise<PlayerState> {
-			const videoId = getVideoId(location.href)
-			const global = await globalEnabled.getValue()
-			const base: PlayerState = {
-				videoId,
-				globalEnabled: global,
+		/** A safe, untransposed `PlayerState` — the shape every read starts from. */
+		function baseState(): PlayerState {
+			return {
+				videoId: getVideoId(location.href),
+				globalEnabled: true,
 				enabled: true,
 				semitones: 0,
 				tempo: 1,
 			}
+		}
+
+		/** Read the state the popup needs to render the controls. */
+		async function getState(): Promise<PlayerState> {
+			const videoId = getVideoId(location.href)
+			const global = await globalEnabled.getValue()
+			const base: PlayerState = { ...baseState(), globalEnabled: global }
 			if (!videoId) return base
 
 			const setting = await getRawVideoSetting(videoId)
@@ -99,7 +102,23 @@ export default defineContentScript({
 				semitones: resolved.semitones,
 				tempo: resolved.tempo,
 			}
-			browser.runtime.sendMessage(badge).catch(() => {})
+			browser.runtime.sendMessage(badge).catch((err) => {
+				// Expected when the service worker is asleep or the tab is closing; logged
+				// rather than swallowed because a lost badge message means the toolbar
+				// keeps advertising the PREVIOUS video's state, which is worse than blank.
+				console.debug('[modulate] badge update dropped', err)
+			})
+		}
+
+		/**
+		 * Fire-and-forget `apply()`. Every trigger below is unattended, and `apply`
+		 * rejects for real reasons — most notably a permanently rejected `injected`
+		 * promise after a failed script injection, which poisons every later call.
+		 * Without this the whole class of failure is an unhandled rejection nobody
+		 * reads, while the popup and badge keep reporting success.
+		 */
+		function scheduleApply(reason: string): void {
+			void apply().catch((err) => console.error(`[modulate] apply failed (${reason})`, err))
 		}
 
 		async function handle(msg: PopupMessage): Promise<PlayerState> {
@@ -108,27 +127,27 @@ export default defineContentScript({
 			// legible. `?? undefined` so a null title doesn't clobber a stored one.
 			const title = getVideoTitle(videoId) ?? undefined
 
+			// No clamping here — `setVideoSetting` clamps every write, so the ranges are
+			// enforced once at the storage boundary instead of at each call site.
 			switch (msg.type) {
 				case 'SET_SEMITONES':
-					if (videoId) {
-						await setVideoSetting(videoId, { semitones: clampSemitones(msg.semitones), title })
-					}
+					if (videoId) await setVideoSetting(videoId, { semitones: msg.semitones, title })
 					break
 				case 'NUDGE_SEMITONES':
 					if (videoId) {
 						const current = await getRawVideoSetting(videoId)
 						const from = current?.semitones ?? 0
-						await setVideoSetting(videoId, { semitones: clampSemitones(from + msg.delta), title })
+						await setVideoSetting(videoId, { semitones: from + msg.delta, title })
 					}
 					break
 				case 'SET_TEMPO':
-					if (videoId) await setVideoSetting(videoId, { tempo: clampTempo(msg.tempo), title })
+					if (videoId) await setVideoSetting(videoId, { tempo: msg.tempo, title })
 					break
 				case 'NUDGE_TEMPO':
 					if (videoId) {
 						const current = await getRawVideoSetting(videoId)
 						const from = current?.tempo ?? 1
-						await setVideoSetting(videoId, { tempo: clampTempo(from + msg.delta), title })
+						await setVideoSetting(videoId, { tempo: from + msg.delta, title })
 					}
 					break
 				case 'SET_VIDEO_ENABLED':
@@ -149,14 +168,21 @@ export default defineContentScript({
 			if (msg.type !== 'GET_STATE') {
 				// A mutating message is a user gesture: (re)apply. Fire-and-forget so the
 				// popup's response isn't held up by graph build or context resume.
-				void apply().catch((err) => console.error('[modulate] apply failed', err))
+				scheduleApply(msg.type)
 			}
 			return getState()
 		}
 
 		browser.runtime.onMessage.addListener(
 			(msg: PopupMessage, _sender, sendResponse: (s: PlayerState) => void) => {
-				handle(msg).then(sendResponse)
+				handle(msg).then(sendResponse, (err) => {
+					// ALWAYS answer. Dropping the response leaves the channel open until the
+					// port closes, at which point the popup's `sendMessage` rejects into its
+					// blanket catch and renders as "no content script here" — so a storage
+					// failure shows up as a button that silently does nothing.
+					console.error('[modulate] message failed', msg?.type, err)
+					sendResponse(baseState())
+				})
 				return true // keep the channel open for the async response
 			},
 		)
@@ -166,26 +192,26 @@ export default defineContentScript({
 		let lastUrl = location.href
 		ctx.addEventListener(document, 'yt-navigate-finish', () => {
 			lastUrl = location.href
-			void apply()
+			scheduleApply('navigation')
 		})
 
 		// Fallback: catch URL changes the event might miss.
 		ctx.setInterval(() => {
 			if (location.href !== lastUrl) {
 				lastUrl = location.href
-				void apply()
+				scheduleApply('url-poll')
 			}
 		}, 1000)
 
 		// Re-apply when settings change elsewhere (the options page edits storage
 		// directly), so the active tab reflects edits live.
 		const unwatchers = [
-			storage.watch('local:videoSettings', () => void apply()),
-			storage.watch('local:audioQuality', () => void apply()),
-			storage.watch('local:globalEnabled', () => void apply()),
+			storage.watch('local:videoSettings', () => scheduleApply('videoSettings')),
+			storage.watch('local:audioQuality', () => scheduleApply('audioQuality')),
+			storage.watch('local:globalEnabled', () => scheduleApply('globalEnabled')),
 		]
 		ctx.onInvalidated(() => unwatchers.forEach((off) => off()))
 
-		void apply()
+		scheduleApply('startup')
 	},
 })
