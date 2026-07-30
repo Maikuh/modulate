@@ -42,6 +42,41 @@ export default defineUnlistedScript(() => {
 	let pending: ApplyMessage | null = null
 	let gestureHooked = false
 
+	// Last effective settings from the content script, replayed when the media
+	// element reloads or YouTube resets it out from under us (see trackVideo).
+	let lastMsg: ApplyMessage | null = null
+
+	// The <video> we've bound lifecycle listeners to. YouTube reuses one element
+	// across most SPA navigations but swaps it for ads/miniplayer; we rebind on swap.
+	let tracked: HTMLVideoElement | null = null
+
+	// Media-load events fire exactly when a new video's audio is about to start, so
+	// re-applying here — not only on the nav event, which fires before the media is
+	// ready — closes the window where the fresh clip plays untransposed at default.
+	// `ratechange` catches YouTube resetting the element's playbackRate on load,
+	// which would otherwise leave the worklet's tempo compensation double-correcting.
+	const MEDIA_EVENTS = ['loadstart', 'emptied', 'ratechange'] as const
+
+	function onMediaEvent(event: Event): void {
+		const msg = lastMsg
+		if (!msg) return
+		// Ignore the ratechange our own applyTempo triggers — only react when YouTube
+		// has diverged the element's rate from what we last asked for.
+		if (event.type === 'ratechange') {
+			const el = event.target as HTMLVideoElement
+			if (msg.tempo === 1 || el.playbackRate === msg.tempo) return
+		}
+		void apply(msg).catch((err) => console.error('[modulate] audio re-apply failed', err))
+	}
+
+	/** Bind lifecycle listeners to the current <video>, moving them on element swap. */
+	function trackVideo(el: HTMLVideoElement): void {
+		if (tracked === el) return
+		if (tracked) for (const type of MEDIA_EVENTS) tracked.removeEventListener(type, onMediaEvent)
+		tracked = el
+		for (const type of MEDIA_EVENTS) el.addEventListener(type, onMediaEvent)
+	}
+
 	/** Retry the pending apply once the page sees its first gesture. */
 	function hookGesture(): void {
 		if (gestureHooked) return
@@ -83,6 +118,9 @@ export default defineUnlistedScript(() => {
 
 		const el = await waitForVideo()
 		if (!el) return
+		// Bind (or rebind on swap) the lifecycle listeners so a later media reload or
+		// YouTube-driven rate reset triggers a replay without waiting for the next nav.
+		trackVideo(el)
 		// Set quality before the graph is built so `ensureGraph` constructs with it.
 		audioEngine.applyQuality({
 			overlapMs: msg.overlapMs,
@@ -108,6 +146,8 @@ export default defineUnlistedScript(() => {
 			return // Not our message.
 		}
 
+		// Remember the latest desired state so media-lifecycle events can replay it.
+		lastMsg = msg
 		void apply(msg).catch((err) => console.error('[modulate] audio apply failed', err))
 	})
 
