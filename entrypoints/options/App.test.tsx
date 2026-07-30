@@ -69,8 +69,10 @@ describe('options App', () => {
 	// Each row's delete button names its row, so a screen reader on a long list
 	// doesn't announce N identical "Remove" buttons.
 	it('gives each remove button a distinct accessible name', async () => {
-		await setVideoSetting('vid1', { title: 'First Song' })
-		await setVideoSetting('vid2', { title: 'Second Song' })
+		// Needs a real setting on each: a title alone is a no-op entry, which
+		// setVideoSetting prunes rather than stores.
+		await setVideoSetting('vid1', { semitones: 2, title: 'First Song' })
+		await setVideoSetting('vid2', { tempo: 1.25, title: 'Second Song' })
 		const { view } = renderApp()
 		expect(await view.findByLabelText('Remove First Song')).toBeInTheDocument()
 		expect(view.getByLabelText('Remove Second Song')).toBeInTheDocument()

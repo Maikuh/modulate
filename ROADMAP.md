@@ -18,9 +18,10 @@ The audio engine (`lib/audioEngine.ts`) routes the player through
 ## Later
 
 - **`sync` storage option.** Move settings to `chrome.storage.sync` for cross-device use.
-  Watch the quota: sync caps ~100KB and ~512 items. The per-video map
-  (`local:videoSettings`) grows unbounded, so sync only the global switch + compact
-  the video map, or prune it before switching.
+  Watch the quota: sync caps ~100KB and ~512 items. Writes now prune entries that sit
+  at the no-op, so the per-video map (`local:videoSettings`) tracks videos actually
+  tuned rather than videos visited — but it is still one object with no hard cap, so
+  sync only the global switch, or compact the map first.
 - **Interpolation strategy tuning.** The quality page exposes WSOLA stretch params today;
   swapping the rate-transposer interpolation strategy additionally needs a second
   web-accessible worklet module (`registerStrategyModule`) — left out to avoid bundling.

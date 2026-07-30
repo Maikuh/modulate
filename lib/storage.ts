@@ -112,6 +112,22 @@ export async function setVideoSetting(
 		...all[videoId],
 		...defined,
 	})
+
+	// Prune rather than store an enabled entry sitting at the no-op: `resolveSetting`
+	// cannot tell it apart from having no entry at all, so it holds no information
+	// the user could lose — while `videoSettings` is one object rewritten in full on
+	// every write, so dead keys cost latency on every later nudge. This also makes
+	// RESET self-cleaning and keeps the options list to videos actually tuned.
+	//
+	// A DISABLED entry is kept even at the no-op: "off for this video" is a choice
+	// the user made, and it has to survive to be shown and toggled back on.
+	if (next.enabled && isNoOp(next)) {
+		if (!(videoId in all)) return next
+		const { [videoId]: _pruned, ...rest } = all
+		await videoSettings.setValue(rest)
+		return next
+	}
+
 	await videoSettings.setValue({ ...all, [videoId]: next })
 	return next
 }
@@ -145,16 +161,29 @@ export interface ResolvedSetting {
 }
 
 /**
+ * "Leave the audio alone": no transpose, original speed. Frozen because it is
+ * handed straight back to callers, and one stray mutation would silently retune
+ * every untouched video.
+ */
+export const NO_OP: Readonly<ResolvedSetting> = Object.freeze({ semitones: 0, tempo: 1 })
+
+/**
+ * Whether a setting asks for nothing. Load-bearing in several senses that are
+ * easy to drift apart when spelled out inline: it decides whether an entry is
+ * worth storing, whether the audio graph bypasses its worklet, and whether the
+ * toolbar shows a badge.
+ */
+export function isNoOp(setting: ResolvedSetting): boolean {
+	return setting.semitones === NO_OP.semitones && setting.tempo === NO_OP.tempo
+}
+
+/**
  * Resolve the values actually applied to audio. An explicit per-video setting
  * applies; otherwise the no-op (0 / 1×). The global master switch and the
  * per-video `enabled` toggle gate everything — when either is off the result is
  * the no-op so the video plays untransposed.
  */
 export function resolveSetting(global: boolean, video: VideoSetting | undefined): ResolvedSetting {
-	if (!global) return { semitones: 0, tempo: 1 }
-	if (video) {
-		if (!video.enabled) return { semitones: 0, tempo: 1 }
-		return { semitones: video.semitones, tempo: video.tempo }
-	}
-	return { semitones: 0, tempo: 1 }
+	if (!global || !video?.enabled) return { ...NO_OP }
+	return { semitones: video.semitones, tempo: video.tempo }
 }

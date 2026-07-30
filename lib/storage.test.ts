@@ -3,6 +3,8 @@ import { fakeBrowser } from 'wxt/testing/fake-browser'
 
 import {
 	resolveSetting,
+	isNoOp,
+	NO_OP,
 	clampSemitones,
 	clampTempo,
 	MIN_SEMITONES,
@@ -141,6 +143,98 @@ describe('video settings round-trip', () => {
 		await setVideoSetting('b', { semitones: 2 })
 		await clearVideoSettings()
 		expect(await listVideoSettings()).toEqual({})
+	})
+})
+
+// videoSettings is one object rewritten in full on every write, so a dead key
+// costs latency on every later nudge. An ENABLED entry at the no-op is dead by
+// definition: resolveSetting cannot tell it from having no entry.
+describe('no-op pruning', () => {
+	beforeEach(() => fakeBrowser.reset())
+
+	it('removes an entry that is set back to the no-op', async () => {
+		await setVideoSetting('abc', { semitones: 5 })
+		expect(await getRawVideoSetting('abc')).toBeDefined()
+
+		await setVideoSetting('abc', { semitones: 0 })
+
+		expect(await getRawVideoSetting('abc')).toBeUndefined()
+		expect(await listVideoSettings()).toEqual({})
+	})
+
+	it('removes an entry whose tempo is set back to 1', async () => {
+		await setVideoSetting('abc', { tempo: 1.5 })
+		await setVideoSetting('abc', { tempo: 1 })
+		expect(await listVideoSettings()).toEqual({})
+	})
+
+	it('keeps an entry while either pitch or tempo is still set', async () => {
+		await setVideoSetting('abc', { semitones: 5, tempo: 1.5 })
+		await setVideoSetting('abc', { semitones: 0 })
+		expect(await getRawVideoSetting('abc')).toMatchObject({ semitones: 0, tempo: 1.5 })
+	})
+
+	// "Off for this video" is a choice the user made; it has to survive to be
+	// listed and toggled back on.
+	it('keeps a disabled entry even at the no-op', async () => {
+		await setVideoSetting('abc', { enabled: false })
+		expect(await getRawVideoSetting('abc')).toMatchObject({
+			enabled: false,
+			semitones: 0,
+			tempo: 1,
+		})
+	})
+
+	it('drops a disabled no-op entry once it is re-enabled', async () => {
+		await setVideoSetting('abc', { enabled: false })
+		await setVideoSetting('abc', { enabled: true })
+		expect(await listVideoSettings()).toEqual({})
+	})
+
+	it('never creates an entry for a no-op write', async () => {
+		await setVideoSetting('abc', { semitones: 0, tempo: 1 })
+		expect(await listVideoSettings()).toEqual({})
+	})
+
+	// RESET writes DEFAULT_VIDEO_SETTING, which is the no-op, so it self-cleans.
+	it('makes RESET remove the entry rather than blank it', async () => {
+		await setVideoSetting('abc', { semitones: 7, title: 'Song' })
+		await setVideoSetting('abc', { ...DEFAULT_VIDEO_SETTING, title: 'Song' })
+		expect(await listVideoSettings()).toEqual({})
+	})
+
+	it('still returns the resolved values it wrote', async () => {
+		expect(await setVideoSetting('abc', { semitones: 0 })).toEqual(DEFAULT_VIDEO_SETTING)
+	})
+
+	it('leaves other videos untouched', async () => {
+		await setVideoSetting('keep', { semitones: 4 })
+		await setVideoSetting('drop', { semitones: 2 })
+		await setVideoSetting('drop', { semitones: 0 })
+		expect(Object.keys(await listVideoSettings())).toEqual(['keep'])
+	})
+})
+
+describe('isNoOp', () => {
+	it('is true only at 0 semitones and 1x', () => {
+		expect(isNoOp({ semitones: 0, tempo: 1 })).toBe(true)
+		expect(isNoOp({ semitones: 1, tempo: 1 })).toBe(false)
+		expect(isNoOp({ semitones: 0, tempo: 1.05 })).toBe(false)
+	})
+
+	it('describes NO_OP itself', () => {
+		expect(isNoOp(NO_OP)).toBe(true)
+	})
+
+	// Handed straight back to callers by resolveSetting; a stray mutation would
+	// silently retune every untouched video.
+	it('exposes NO_OP frozen', () => {
+		expect(Object.isFrozen(NO_OP)).toBe(true)
+	})
+
+	it('resolveSetting returns a copy, not the shared constant', () => {
+		expect(resolveSetting(false, undefined)).not.toBe(NO_OP)
+		expect(resolveSetting(false, undefined)).toEqual(NO_OP)
 	})
 })
 
