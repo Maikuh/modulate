@@ -8,8 +8,10 @@ import type { ApplyMessage } from '@/lib/messaging'
  * `processorOptions` object into the page-realm worklet.
  *
  * The content script can't reach the page realm directly either, so it forwards
- * the effective semitone value here via `window.postMessage`. The payload is a
- * JSON string — primitives cross the content/page membrane without `cloneInto`.
+ * the resolved settings here via `window.postMessage` — pitch, tempo, the WSOLA
+ * quality knobs, and the worklet URL (which only the content script can resolve,
+ * having the extension APIs). The payload is a JSON string: primitives cross the
+ * content/page membrane without `cloneInto`.
  */
 export default defineUnlistedScript(() => {
 	/** Find the player's media element (mounts late on first load). */
@@ -31,15 +33,20 @@ export default defineUnlistedScript(() => {
 		if (existing) return Promise.resolve(existing)
 
 		return new Promise((resolve) => {
+			// Cleared on the observer path: this watches the whole document with
+			// `subtree: true` on one of the most mutation-heavy pages on the web, and
+			// apply() can be in flight from several triggers at once.
+			let timer: ReturnType<typeof setTimeout>
 			const observer = new MutationObserver(() => {
 				const el = findVideo()
 				if (el) {
 					observer.disconnect()
+					clearTimeout(timer)
 					resolve(el)
 				}
 			})
 			observer.observe(document.documentElement, { childList: true, subtree: true })
-			setTimeout(() => {
+			timer = setTimeout(() => {
 				observer.disconnect()
 				resolve(findVideo())
 			}, timeoutMs)
@@ -128,8 +135,15 @@ export default defineUnlistedScript(() => {
 		// Defer the FIRST graph build until the page has user activation. Building
 		// captures the element (irreversibly) and routes its audio through a context
 		// that starts `suspended`; without activation `resume()` can't run, so the
-		// captured element would play silently. This bites auto-applies — page load,
-		// SPA nav, options-page edits — which carry no gesture, unlike a popup click.
+		// captured element would play silently.
+		//
+		// Note this gates EVERY trigger, popup clicks included. `hasBeenActive` is a
+		// property of THIS window, and the popup is a separate browsing context at a
+		// chrome-extension:// origin — clicking it grants the YouTube document
+		// nothing. So a pitch change made from the popup on an autoplaying page that
+		// the user never clicked queues here like any auto-apply, until the first
+		// pointerdown/keydown in the page itself.
+		//
 		// When the activation API is unavailable (older Firefox) we can't tell, so we
 		// fall through and build as before. Once a graph exists, re-applies are cheap.
 		const ua = navigator.userActivation
@@ -140,7 +154,12 @@ export default defineUnlistedScript(() => {
 		}
 
 		const el = await waitForVideo()
-		if (!el) return
+		if (!el) {
+			// Ten seconds with no <video>. Nothing re-triggers us either: the media
+			// events we replay from are bound to an element that never existed.
+			console.warn('[modulate] no <video> found; settings not applied')
+			return
+		}
 		// Bind (or rebind on swap) the lifecycle listeners so a later media reload or
 		// YouTube-driven rate reset triggers a replay without waiting for the next nav.
 		trackVideo(el)
@@ -152,22 +171,65 @@ export default defineUnlistedScript(() => {
 		await audioEngine.ensureGraph(el, msg.processorUrl)
 		audioEngine.applyTempo(msg.tempo)
 		audioEngine.applySemitones(msg.semitones)
-		// We only reach a graph build after user activation (popup click, or the
-		// gesture gate above), so the context can resume here.
+		// Best-effort: the gate above means we normally arrive with activation, but
+		// the older-Firefox fallthrough can reach here without it, in which case the
+		// context stays suspended and the captured element plays silently.
 		await audioEngine.resume()
+		if (!audioEngine.running) {
+			console.warn('[modulate] audio context did not resume; click the page to start audio')
+			hookGesture()
+			pending = msg
+		}
+	}
+
+	/**
+	 * Parse an inbound payload into an `ApplyMessage`, or null if it isn't one.
+	 *
+	 * Every field is checked, not just the discriminant. `event.source === window`
+	 * is not a trust boundary here: this listener runs in the MAIN world, which we
+	 * share with YouTube's own scripts and any other extension injecting there, so
+	 * a well-formed message can come from something that isn't our content script.
+	 * `processorUrl` is the field that matters most — it goes straight to
+	 * `audioWorklet.addModule`, so it must be an extension URL and nothing else.
+	 */
+	function parseApplyMessage(raw: string): ApplyMessage | null {
+		let parsed: unknown
+		try {
+			parsed = JSON.parse(raw)
+		} catch {
+			return null // The page posts non-JSON strings constantly.
+		}
+		if (typeof parsed !== 'object' || parsed === null) return null
+		const m = parsed as Record<string, unknown>
+		if (m.source !== 'modulate' || m.type !== 'apply') return null
+
+		if (typeof m.processorUrl !== 'string') return null
+		if (!/^(chrome|moz)-extension:\/\//.test(m.processorUrl)) return null
+		if (!isFiniteNumber(m.semitones) || !isFiniteNumber(m.tempo) || !isFiniteNumber(m.overlapMs))
+			return null
+		if (typeof m.quickSeek !== 'boolean') return null
+
+		return {
+			source: 'modulate',
+			type: 'apply',
+			processorUrl: m.processorUrl,
+			semitones: m.semitones,
+			tempo: m.tempo,
+			overlapMs: m.overlapMs,
+			quickSeek: m.quickSeek,
+		}
+	}
+
+	/** Narrow to a finite number — rejects NaN, Infinity, strings and undefined. */
+	function isFiniteNumber(value: unknown): value is number {
+		return typeof value === 'number' && Number.isFinite(value)
 	}
 
 	window.addEventListener('message', (event) => {
 		if (event.source !== window || typeof event.data !== 'string') return
 
-		let msg: ApplyMessage
-		try {
-			const parsed = JSON.parse(event.data)
-			if (parsed?.source !== 'modulate' || parsed.type !== 'apply') return
-			msg = parsed
-		} catch {
-			return // Not our message.
-		}
+		const msg = parseApplyMessage(event.data)
+		if (!msg) return
 
 		// Remember the latest desired state so media-lifecycle events can replay it.
 		lastMsg = msg
