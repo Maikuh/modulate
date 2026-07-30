@@ -58,6 +58,14 @@ describe('clampSemitones', () => {
 		expect(clampSemitones(0)).toBe(0)
 		expect(clampSemitones(-7)).toBe(-7)
 	})
+
+	// NaN survives Math.round/min/max, so without an explicit guard it reaches
+	// AudioParam.value and throws mid-reroute, leaving the video muted.
+	it('falls back to the default for non-finite and non-numeric input', () => {
+		expect(clampSemitones(Number.NaN)).toBe(DEFAULT_VIDEO_SETTING.semitones)
+		expect(clampSemitones(Number.POSITIVE_INFINITY)).toBe(DEFAULT_VIDEO_SETTING.semitones)
+		expect(clampSemitones('3' as unknown as number)).toBe(DEFAULT_VIDEO_SETTING.semitones)
+	})
 })
 
 describe('clampTempo', () => {
@@ -74,6 +82,18 @@ describe('clampTempo', () => {
 	it('keeps 2-decimal precision (no float drift)', () => {
 		expect(clampTempo(1)).toBe(1)
 		expect(clampTempo(1.05)).toBe(1.05)
+	})
+
+	// A tempo of 0 reaches element.playbackRate and freezes the video outright;
+	// NaN throws. Neither may survive the clamp.
+	it('falls back to the default for non-finite and non-numeric input', () => {
+		expect(clampTempo(Number.NaN)).toBe(DEFAULT_VIDEO_SETTING.tempo)
+		expect(clampTempo(Number.POSITIVE_INFINITY)).toBe(DEFAULT_VIDEO_SETTING.tempo)
+		expect(clampTempo('1.5' as unknown as number)).toBe(DEFAULT_VIDEO_SETTING.tempo)
+	})
+
+	it('lifts 0 to the minimum rather than freezing playback', () => {
+		expect(clampTempo(0)).toBe(MIN_TEMPO)
 	})
 })
 
@@ -126,6 +146,77 @@ describe('video settings round-trip', () => {
 		await setVideoSetting('b', { semitones: 2 })
 		await clearVideoSettings()
 		expect(await listVideoSettings()).toEqual({})
+	})
+})
+
+// `storage.defineItem`'s type parameter is an unchecked assertion — its `fallback`
+// only fires when the key is ABSENT, so whatever is actually stored arrives typed
+// as a VideoSetting without ever having been validated. These pin the normalize
+// step that stands between storage and `element.playbackRate`.
+describe('range enforcement at the storage boundary', () => {
+	beforeEach(() => fakeBrowser.reset())
+
+	/** Write straight past `setVideoSetting` to simulate a corrupt/legacy entry. */
+	async function seedRaw(entries: Record<string, unknown>): Promise<void> {
+		await fakeBrowser.storage.local.set({ videoSettings: entries })
+	}
+
+	it('clamps on write, so no call site can persist an out-of-range value', async () => {
+		await setVideoSetting('abc', { semitones: 99, tempo: 9 })
+		expect(await getRawVideoSetting('abc')).toMatchObject({
+			semitones: MAX_SEMITONES,
+			tempo: MAX_TEMPO,
+		})
+	})
+
+	it('clamps a nudge that would overshoot the range', async () => {
+		await setVideoSetting('abc', { semitones: MAX_SEMITONES })
+		await setVideoSetting('abc', { semitones: MAX_SEMITONES + 5 })
+		expect(await getRawVideoSetting('abc')).toMatchObject({ semitones: MAX_SEMITONES })
+	})
+
+	it('normalizes an out-of-range entry on read', async () => {
+		await seedRaw({ abc: { enabled: true, semitones: 500, tempo: 50 } })
+		expect(await getRawVideoSetting('abc')).toEqual({
+			enabled: true,
+			semitones: MAX_SEMITONES,
+			tempo: MAX_TEMPO,
+		})
+	})
+
+	it('replaces a NaN tempo on read instead of passing it to the audio graph', async () => {
+		await seedRaw({ abc: { enabled: true, semitones: 0, tempo: Number.NaN } })
+		expect(await getRawVideoSetting('abc')).toMatchObject({ tempo: DEFAULT_VIDEO_SETTING.tempo })
+	})
+
+	it('backfills a legacy entry that predates a field', async () => {
+		await seedRaw({ abc: { enabled: true, semitones: 3 } })
+		expect(await getRawVideoSetting('abc')).toEqual({
+			enabled: true,
+			semitones: 3,
+			tempo: DEFAULT_VIDEO_SETTING.tempo,
+		})
+	})
+
+	// The options page renders `s.tempo.toFixed(2)`; an unmerged entry would throw
+	// during render and blank the page, including the controls that would fix it.
+	it('listVideoSettings merges defaults like the single-entry accessors', async () => {
+		await seedRaw({ abc: { enabled: true, semitones: 3 } })
+		const all = await listVideoSettings()
+		expect(all.abc).toEqual({
+			enabled: true,
+			semitones: 3,
+			tempo: DEFAULT_VIDEO_SETTING.tempo,
+		})
+	})
+
+	it('resolveSetting yields applied values that are always in range', async () => {
+		await seedRaw({ abc: { enabled: true, semitones: -500, tempo: 0 } })
+		const entry = await getRawVideoSetting('abc')
+		expect(resolveSetting(true, entry)).toEqual({
+			semitones: MIN_SEMITONES,
+			tempo: MIN_TEMPO,
+		})
 	})
 })
 

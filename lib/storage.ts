@@ -36,15 +36,44 @@ export const MIN_TEMPO = 0.5
 export const MAX_TEMPO = 2
 export const TEMPO_STEP = 0.05
 
-/** Clamp helpers — keep the same rounding everywhere a value is persisted. */
+/**
+ * Clamp helpers — keep the same rounding everywhere a value is persisted.
+ *
+ * The `Number.isFinite` guards are load-bearing, not defensive noise: `NaN`
+ * survives both `Math.round` and `Math.min`/`Math.max` unchanged, so without them
+ * a `NaN` reaches `element.playbackRate` and `AudioParam.value`, which are
+ * restricted floats and throw `TypeError`. That throw lands mid-reroute in
+ * `AudioEngine.route()`, between the disconnect and the reconnect, leaving the
+ * video permanently muted. They also reject non-numbers outright, which is what
+ * a hand-edited or version-skewed storage entry looks like.
+ */
 export function clampSemitones(n: number): number {
+	if (!Number.isFinite(n)) return DEFAULT_VIDEO_SETTING.semitones
 	return Math.max(MIN_SEMITONES, Math.min(MAX_SEMITONES, Math.round(n)))
 }
 
 export function clampTempo(n: number): number {
+	if (!Number.isFinite(n)) return DEFAULT_VIDEO_SETTING.tempo
 	// Round to the step grid so float drift from repeated nudges can't accumulate.
 	const snapped = Math.round(n / TEMPO_STEP) * TEMPO_STEP
 	return Math.max(MIN_TEMPO, Math.min(MAX_TEMPO, Number(snapped.toFixed(2))))
+}
+
+/**
+ * Force a stored entry onto the valid ranges. Applied on every read AND every
+ * write, because `storage.defineItem`'s type parameter is an unchecked assertion:
+ * its `fallback` only fires when the key is absent, so anything actually sitting
+ * in `chrome.storage.local` — written by an older version, edited from devtools,
+ * or (on the ROADMAP) synced from another device — arrives typed as a
+ * `VideoSetting` without ever having been one.
+ */
+function normalize(setting: VideoSetting): VideoSetting {
+	return {
+		...setting,
+		enabled: setting.enabled !== false,
+		semitones: clampSemitones(setting.semitones),
+		tempo: clampTempo(setting.tempo),
+	}
 }
 
 /** Global master switch. When off, every video plays untransposed. */
@@ -64,13 +93,13 @@ export const audioQuality = storage.defineItem<AudioQuality>('local:audioQuality
 
 export async function getVideoSetting(videoId: string): Promise<VideoSetting> {
 	const all = await videoSettings.getValue()
-	return { ...DEFAULT_VIDEO_SETTING, ...all[videoId] }
+	return normalize({ ...DEFAULT_VIDEO_SETTING, ...all[videoId] })
 }
 
 /** Whether an explicit per-video entry exists (distinct from the merged default). */
 export async function getRawVideoSetting(videoId: string): Promise<VideoSetting | undefined> {
 	const all = await videoSettings.getValue()
-	return all[videoId] ? { ...DEFAULT_VIDEO_SETTING, ...all[videoId] } : undefined
+	return all[videoId] ? normalize({ ...DEFAULT_VIDEO_SETTING, ...all[videoId] }) : undefined
 }
 
 export async function setVideoSetting(
@@ -81,17 +110,26 @@ export async function setVideoSetting(
 	// Drop `undefined` fields so a partial can't blank out a stored value (e.g. a
 	// null title before the watch metadata mounts must not erase a saved one).
 	const defined = Object.fromEntries(Object.entries(partial).filter(([, v]) => v !== undefined))
-	const next: VideoSetting = {
+	// Clamp here rather than at each call site: this is the only way a value enters
+	// storage, so enforcing the range at the mutator means callers can't forget.
+	const next: VideoSetting = normalize({
 		...DEFAULT_VIDEO_SETTING,
 		...all[videoId],
 		...defined,
-	}
+	})
 	await videoSettings.setValue({ ...all, [videoId]: next })
 	return next
 }
 
 export async function listVideoSettings(): Promise<Record<string, VideoSetting>> {
-	return videoSettings.getValue()
+	const all = await videoSettings.getValue()
+	// Merge + normalize like the single-entry accessors. Without this the options
+	// page reads entries raw, and one missing field (a legacy write, a downgrade)
+	// makes `s.tempo.toFixed(2)` throw during render — blanking the whole page,
+	// including the controls that would delete the offending entry.
+	return Object.fromEntries(
+		Object.entries(all).map(([id, s]) => [id, normalize({ ...DEFAULT_VIDEO_SETTING, ...s })]),
+	)
 }
 
 export async function removeVideoSetting(videoId: string): Promise<void> {
