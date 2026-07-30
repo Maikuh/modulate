@@ -24,7 +24,12 @@ export default defineBackground(() => {
 		if (tabId == null || !action) return
 		const d = onVideo ? 'icons' : 'icons-disabled'
 		const path = { 16: `${d}/16.png`, 32: `${d}/32.png`, 48: `${d}/48.png`, 128: `${d}/128.png` }
-		action.setIcon({ tabId, path })?.catch?.(() => {})
+		// Rejects benignly when the tab closed mid-flight, but also when the grayscale
+		// set is missing from the build — and that set is the manifest's `default_icon`,
+		// so a silent failure there means no icon renders anywhere and nothing says why.
+		action.setIcon({ tabId, path })?.catch?.((err: unknown) => {
+			console.debug('[modulate] setIcon failed', err)
+		})
 	}
 
 	// A full-document navigation clears the per-tab icon override back to grayscale.
@@ -36,8 +41,7 @@ export default defineBackground(() => {
 		if (info.status === 'loading') setIcon(tabId, false)
 	})
 
-	// Keyboard shortcuts: forward to the active tab's content script. Errors mean
-	// the tab has no content script (not YouTube) — ignore.
+	// Keyboard shortcuts: forward to the active tab's content script.
 	browser.commands?.onCommand.addListener(async (command) => {
 		const msg = COMMAND_MESSAGES[command]
 		if (!msg) return
@@ -45,8 +49,12 @@ export default defineBackground(() => {
 		if (tab?.id == null) return
 		try {
 			await browser.tabs.sendMessage(tab.id, msg)
-		} catch {
-			// No content script in this tab.
+		} catch (err) {
+			// Usually just "not a YouTube tab". But the same rejection covers a YouTube
+			// tab that predates an extension install/reload and so has no content script
+			// yet — there the shortcut appears broken and only a tab reload fixes it, so
+			// don't swallow the distinction entirely.
+			console.debug('[modulate] shortcut not delivered', command, err)
 		}
 	})
 
@@ -59,9 +67,15 @@ export default defineBackground(() => {
 		setIcon(tabId, message.onVideo)
 
 		// Badge stays compact: negative pitch keeps its `-`, positive drops the `+`.
+		// Tempo-only gets a glyph rather than the number — the badge fits roughly four
+		// characters, and "1.25" leaves no room to also signal what it means.
 		const text =
 			message.semitones !== 0 ? String(message.semitones) : message.tempo !== 1 ? '♪' : ''
-		action.setBadgeText({ tabId, text })
-		action.setBadgeBackgroundColor?.({ tabId, color: ACCENT })
+		// Both reject with "No tab with id" if the tab closed between the content
+		// script's send and this handler; unhandled, that surfaces as a service-worker
+		// error with no context.
+		const onError = (err: unknown) => console.debug('[modulate] badge update failed', err)
+		action.setBadgeText({ tabId, text })?.catch?.(onError)
+		action.setBadgeBackgroundColor?.({ tabId, color: ACCENT })?.catch?.(onError)
 	})
 })
