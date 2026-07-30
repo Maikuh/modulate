@@ -22,7 +22,10 @@ export default defineWxtModule((wxt) => {
 	wxt.hooks.hook('build:done', async (wxt, output) => {
 		await mkdir(resolve(wxt.config.outDir, DIR), { recursive: true })
 		for (const size of SIZES) {
-			await sharp(src).resize(size).png().toFile(resolve(wxt.config.outDir, `${DIR}/${size}.png`))
+			await sharp(src)
+				.resize(size)
+				.png()
+				.toFile(resolve(wxt.config.outDir, `${DIR}/${size}.png`))
 			output.publicAssets.push({ type: 'asset', fileName: `${DIR}/${size}.png` })
 		}
 	})
