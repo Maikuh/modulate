@@ -40,6 +40,8 @@ class AudioEngine {
 	private node: SoundTouchNode | null = null
 	private element: HTMLMediaElement | null = null
 	private building: Promise<void> | null = null
+	/** Which element the in-flight `building` promise is capturing, if any. */
+	private buildingFor: HTMLMediaElement | null = null
 	private semitones = 0
 	private tempo = 1
 	private quality: AudioQuality = DEFAULT_AUDIO_QUALITY
@@ -61,13 +63,29 @@ class AudioEngine {
 		return this.semitones === 0 && this.tempo === 1
 	}
 
-	/** Build the graph for `el` if not already built. Idempotent and safe to await repeatedly. */
+	/**
+	 * Build the graph for `el` if not already built. Idempotent and safe to await
+	 * repeatedly, including concurrently for different elements.
+	 */
 	async ensureGraph(el: HTMLMediaElement, processorUrl: string): Promise<void> {
 		if (this.element === el && this.node) return
-		if (this.building) return this.building
 
+		if (this.building) {
+			// Join an in-flight build only when it is capturing the same element.
+			if (this.buildingFor === el) return this.building
+			// Otherwise YouTube swapped the <video> mid-build. Returning the in-flight
+			// promise would resolve "successfully" while the graph points at the OLD
+			// element — the caller then applies pitch/tempo to an element that is no
+			// longer playing, and the one that is stays uncaptured until some unrelated
+			// later apply happens to rebuild. Let it settle, then build for real.
+			await this.building.catch(() => {})
+			return this.ensureGraph(el, processorUrl)
+		}
+
+		this.buildingFor = el
 		this.building = this.build(el, processorUrl).finally(() => {
 			this.building = null
+			this.buildingFor = null
 		})
 		return this.building
 	}
@@ -126,15 +144,27 @@ class AudioEngine {
 		if (!this.ctx || !this.source || !this.node) return
 		this.source.disconnect()
 		this.node.disconnect()
-		if (this.bypassed) {
-			// Restore native speed + pitch preservation; the worklet's params are moot
-			// while disconnected.
-			this.releaseRate()
+		try {
+			if (this.bypassed) {
+				// Restore native speed + pitch preservation; the worklet's params are moot
+				// while disconnected.
+				this.releaseRate()
+				this.source.connect(this.ctx.destination)
+			} else {
+				this.applyLive()
+				this.source.connect(this.node)
+				this.node.connect(this.ctx.destination)
+			}
+		} catch (err) {
+			// Never leave the source stranded between the disconnect above and a
+			// connect. `applyLive` writes restricted floats (`AudioParam.value`,
+			// `element.playbackRate`) that throw on a value the clamps didn't catch —
+			// and a captured element can no longer fall back to direct output, so a
+			// throw here would mute the video permanently with no recovery short of a
+			// reload. Fall back to the bypass wiring, then rethrow.
+			this.source.disconnect()
 			this.source.connect(this.ctx.destination)
-		} else {
-			this.applyLive()
-			this.source.connect(this.node)
-			this.node.connect(this.ctx.destination)
+			throw err
 		}
 	}
 
@@ -195,6 +225,15 @@ class AudioEngine {
 		return this.node !== null
 	}
 
+	/**
+	 * Whether the context is actually processing. `resume()` resolving is not proof
+	 * of this — autoplay policy can leave the context suspended, and a suspended
+	 * context on a captured element means silence, not passthrough.
+	 */
+	get running(): boolean {
+		return this.ctx?.state === 'running'
+	}
+
 	/** Apply pitch shift in semitones (tempo untouched). */
 	applySemitones(semitones: number): void {
 		const was = this.bypassed
@@ -240,7 +279,12 @@ class AudioEngine {
 		this.node = null
 		this.source = null
 		this.element = null
-		if (ctx && ctx.state !== 'closed') await ctx.close().catch(() => {})
+		if (ctx && ctx.state !== 'closed') {
+			// A close that silently fails is what drives the context cap to exhaustion,
+			// after which `new AudioContext()` throws and audio is dead for the page.
+			// Don't swallow it — this is the one failure we most need to see.
+			await ctx.close().catch((err) => console.error('[modulate] context close failed', err))
+		}
 	}
 }
 
