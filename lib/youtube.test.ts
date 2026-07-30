@@ -28,4 +28,12 @@ describe('getVideoId', () => {
 	it('returns null for malformed URLs', () => {
 		expect(getVideoId('not a url')).toBeNull()
 	})
+
+	// `searchParams.get` yields '' here, which is falsy for the write guards but
+	// truthy for the `!= null` checks driving the toolbar icon and the popup's
+	// on-a-video state — so the popup would render controls that silently do nothing.
+	it('returns null (not an empty string) for a valueless v param', () => {
+		expect(getVideoId('https://www.youtube.com/watch?v=')).toBeNull()
+		expect(getVideoId('https://www.youtube.com/watch')).toBeNull()
+	})
 })

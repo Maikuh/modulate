@@ -121,6 +121,21 @@ export default defineContentScript({
 			void apply().catch((err) => console.error(`[modulate] apply failed (${reason})`, err))
 		}
 
+		/**
+		 * Serializes storage mutations. The `NUDGE_*` cases are read-modify-write and
+		 * `setVideoSetting` rewrites the whole `videoSettings` record, so overlapping
+		 * handlers lose updates: holding a keyboard shortcut fires on OS key repeat
+		 * (~30/s), and without this every message in the burst reads the same starting
+		 * value and writes the same result — hold for a second, move by one step.
+		 */
+		let mutations: Promise<unknown> = Promise.resolve()
+		function serialize<T>(work: () => Promise<T>): Promise<T> {
+			const next = mutations.then(work, work)
+			// Keep the chain alive past a rejection; the caller still sees the error.
+			mutations = next.catch(() => {})
+			return next
+		}
+
 		async function handle(msg: PopupMessage): Promise<PlayerState> {
 			const videoId = getVideoId(location.href)
 			// Capture the readable title alongside any save so the options list is
@@ -135,9 +150,11 @@ export default defineContentScript({
 					break
 				case 'NUDGE_SEMITONES':
 					if (videoId) {
-						const current = await getRawVideoSetting(videoId)
-						const from = current?.semitones ?? 0
-						await setVideoSetting(videoId, { semitones: from + msg.delta, title })
+						await serialize(async () => {
+							const current = await getRawVideoSetting(videoId)
+							const from = current?.semitones ?? 0
+							return setVideoSetting(videoId, { semitones: from + msg.delta, title })
+						})
 					}
 					break
 				case 'SET_TEMPO':
@@ -145,9 +162,11 @@ export default defineContentScript({
 					break
 				case 'NUDGE_TEMPO':
 					if (videoId) {
-						const current = await getRawVideoSetting(videoId)
-						const from = current?.tempo ?? 1
-						await setVideoSetting(videoId, { tempo: from + msg.delta, title })
+						await serialize(async () => {
+							const current = await getRawVideoSetting(videoId)
+							const from = current?.tempo ?? 1
+							return setVideoSetting(videoId, { tempo: from + msg.delta, title })
+						})
 					}
 					break
 				case 'SET_VIDEO_ENABLED':
@@ -161,6 +180,14 @@ export default defineContentScript({
 					break
 				case 'GET_STATE':
 					break
+				default: {
+					// Exhaustiveness check. Without it a new PopupMessage variant compiles,
+					// falls through every case, and still trips the `!== 'GET_STATE'` test
+					// below — silently firing an apply for a message nothing handled.
+					const unhandled: never = msg
+					console.warn('[modulate] unhandled message', unhandled)
+					return getState()
+				}
 			}
 
 			// GET_STATE is a pure read fired on popup mount — never touch the audio

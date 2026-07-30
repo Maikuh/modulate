@@ -9,7 +9,12 @@ export function getVideoId(url: string): string | null {
 	try {
 		const u = new URL(url)
 		if (!/(^|\.)youtube\.com$/.test(u.hostname)) return null
-		return u.searchParams.get('v')
+		// Normalize `?v=` with no value to null. `searchParams.get` hands back `''`,
+		// which is falsy for the `if (videoId)` write guards but truthy for the
+		// `videoId != null` checks that drive the toolbar icon and the popup's
+		// on-a-video state — so the popup would render full working-looking controls
+		// whose every action is silently dropped.
+		return u.searchParams.get('v') || null
 	} catch {
 		return null
 	}
