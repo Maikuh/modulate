@@ -91,11 +91,6 @@ export const audioQuality = storage.defineItem<AudioQuality>('local:audioQuality
 	fallback: DEFAULT_AUDIO_QUALITY,
 })
 
-export async function getVideoSetting(videoId: string): Promise<VideoSetting> {
-	const all = await videoSettings.getValue()
-	return normalize({ ...DEFAULT_VIDEO_SETTING, ...all[videoId] })
-}
-
 /** Whether an explicit per-video entry exists (distinct from the merged default). */
 export async function getRawVideoSetting(videoId: string): Promise<VideoSetting | undefined> {
 	const all = await videoSettings.getValue()

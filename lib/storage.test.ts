@@ -13,7 +13,6 @@ import {
 	audioQuality,
 	DEFAULT_AUDIO_QUALITY,
 	DEFAULT_VIDEO_SETTING,
-	getVideoSetting,
 	getRawVideoSetting,
 	setVideoSetting,
 	listVideoSettings,
@@ -103,7 +102,7 @@ describe('video settings round-trip', () => {
 
 	it('writes then reads a per-video setting', async () => {
 		await setVideoSetting('abc', { semitones: 3, tempo: 1.25 })
-		expect(await getVideoSetting('abc')).toEqual({
+		expect(await getRawVideoSetting('abc')).toEqual({
 			enabled: true,
 			semitones: 3,
 			tempo: 1.25,
@@ -112,14 +111,10 @@ describe('video settings round-trip', () => {
 
 	it('merges defaults into a partial write', async () => {
 		await setVideoSetting('abc', { semitones: 2 })
-		expect(await getVideoSetting('abc')).toEqual({
+		expect(await getRawVideoSetting('abc')).toEqual({
 			...DEFAULT_VIDEO_SETTING,
 			semitones: 2,
 		})
-	})
-
-	it('getVideoSetting returns merged defaults when absent', async () => {
-		expect(await getVideoSetting('missing')).toEqual(DEFAULT_VIDEO_SETTING)
 	})
 
 	it('getRawVideoSetting returns undefined when no explicit entry', async () => {
