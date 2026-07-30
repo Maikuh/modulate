@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest'
 
 import { Toggle } from './Toggle'
 
-// Scope queries to this render's container — WxtVitest runs without DOM isolation.
+// Scope queries to this render's container; `render` appends to document.body.
 function setup(props: Parameters<typeof Toggle>[0]) {
 	return within(render(<Toggle {...props} />).container as HTMLElement)
 }

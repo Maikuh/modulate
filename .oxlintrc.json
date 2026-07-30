@@ -22,5 +22,5 @@
 			}
 		}
 	],
-	"ignorePatterns": ["public/soundtouch-processor.js", ".output", ".wxt", "node_modules"]
+	"ignorePatterns": [".output", ".wxt", "node_modules"]
 }

@@ -4,8 +4,8 @@ import { describe, it, expect, vi } from 'vitest'
 
 import { ControlRow } from './ControlRow'
 
-// WxtVitest runs test files without DOM isolation, so leftover trees can linger
-// in document.body. Scope every query to this render's own container.
+// Scope queries to this render's container: `render` appends to document.body
+// and sibling cases in the same file share it.
 function setup(overrides: Partial<Parameters<typeof ControlRow>[0]> = {}) {
 	const props = {
 		label: 'Pitch',

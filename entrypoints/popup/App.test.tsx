@@ -25,7 +25,7 @@ function mockTabs(state: PlayerState | null) {
 	return sendMessage
 }
 
-// WxtVitest runs without DOM isolation; scope queries to this render's container.
+// Scope queries to this render's container; `render` appends to document.body.
 function renderApp() {
 	return within(render(<App />).container as HTMLElement)
 }

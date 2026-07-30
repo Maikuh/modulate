@@ -8,7 +8,7 @@
  *
  * A third actor, the background script, drives keyboard `commands` (sending
  * `PopupMessage`s to the active tab) and renders the toolbar badge (receiving a
- * `BackgroundMessage` from the content script).
+ * `BadgeMessage` from the content script).
  */
 
 export type PopupMessage =
