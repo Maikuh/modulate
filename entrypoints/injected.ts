@@ -14,7 +14,15 @@ import type { ApplyMessage } from '@/lib/messaging'
 export default defineUnlistedScript(() => {
 	/** Find the player's media element (mounts late on first load). */
 	function findVideo(): HTMLVideoElement | null {
-		return document.querySelector<HTMLVideoElement>('video.html5-main-video, video')
+		// Two queries rather than one selector list: `querySelector` returns the first
+		// match in TREE order, so `'video.html5-main-video, video'` hands back any
+		// stray <video> that happens to precede the player (feed hover-previews,
+		// inline players) and the specific selector never wins. Capture is one-shot
+		// and irreversible, so binding the wrong element cannot be undone.
+		return (
+			document.querySelector<HTMLVideoElement>('video.html5-main-video') ??
+			document.querySelector<HTMLVideoElement>('video')
+		)
 	}
 
 	/** Resolve once a <video> exists, or null after a timeout. */
@@ -50,21 +58,26 @@ export default defineUnlistedScript(() => {
 	// across most SPA navigations but swaps it for ads/miniplayer; we rebind on swap.
 	let tracked: HTMLVideoElement | null = null
 
-	// Media-load events fire exactly when a new video's audio is about to start, so
-	// re-applying here — not only on the nav event, which fires before the media is
-	// ready — closes the window where the fresh clip plays untransposed at default.
-	// `ratechange` catches YouTube resetting the element's playbackRate on load,
-	// which would otherwise leave the worklet's tempo compensation double-correcting.
+	// `loadstart`/`emptied` bracket the player tearing down one clip and starting the
+	// next. Re-applying there — not only on the nav event, which fires before the
+	// media is ready — closes the window where a fresh clip plays untransposed.
+	// `ratechange` is not a load event; it catches YouTube writing the element's
+	// playbackRate out from under us, which would strand the worklet compensating
+	// for a rate the element no longer has.
 	const MEDIA_EVENTS = ['loadstart', 'emptied', 'ratechange'] as const
 
 	function onMediaEvent(event: Event): void {
 		const msg = lastMsg
 		if (!msg) return
-		// Ignore the ratechange our own applyTempo triggers — only react when YouTube
-		// has diverged the element's rate from what we last asked for.
 		if (event.type === 'ratechange') {
 			const el = event.target as HTMLVideoElement
-			if (msg.tempo === 1 || el.playbackRate === msg.tempo) return
+			// At tempo 1 the element's rate is not ours to hold: `applyLive` has handed
+			// it back to the page (pitch preservation on, worklet compensating nothing),
+			// so YouTube's speed menu owns it and we must not fight it.
+			if (msg.tempo === 1) return
+			// Otherwise ignore the ratechange our own `applyTempo` just triggered — this
+			// is also what stops apply → playbackRate → ratechange → apply looping.
+			if (el.playbackRate === msg.tempo) return
 		}
 		void apply(msg).catch((err) => console.error('[modulate] audio re-apply failed', err))
 	}
@@ -96,11 +109,21 @@ export default defineUnlistedScript(() => {
 	}
 
 	async function apply(msg: ApplyMessage): Promise<void> {
-		// Lazy capture: leave the <video> untouched until a real change (transpose or
-		// tempo) is asked for. `createMediaElementSource` is irreversible and reroutes
-		// ALL audio through Web Audio — capturing for a no-op needlessly exposes normal
-		// playback to any graph/worklet fault. Nothing to do here, so bail.
-		if (msg.semitones === 0 && msg.tempo === 1 && !audioEngine.hasGraph) return
+		if (msg.semitones === 0 && msg.tempo === 1) {
+			// Lazy capture: leave the <video> untouched until a real change (transpose or
+			// tempo) is asked for. `createMediaElementSource` is irreversible and reroutes
+			// ALL audio through Web Audio — capturing for a no-op needlessly exposes
+			// normal playback to any graph/worklet fault.
+			if (!audioEngine.hasGraph) return
+			// A graph already exists: bypass it in place and return WITHOUT re-resolving
+			// the element. Leaving a watch page for the feed resolves to a no-op, and
+			// `findVideo` off a watch page can legitimately match a hover-preview — which
+			// would send `ensureGraph` down its element-swap path, disposing the working
+			// context and irreversibly capturing the wrong <video>.
+			audioEngine.applyTempo(1)
+			audioEngine.applySemitones(0)
+			return
+		}
 
 		// Defer the FIRST graph build until the page has user activation. Building
 		// captures the element (irreversibly) and routes its audio through a context
