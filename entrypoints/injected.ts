@@ -1,5 +1,5 @@
 import { audioEngine } from '@/lib/audioEngine'
-import type { ApplyMessage } from '@/lib/messaging'
+import { parseApplyMessage, type ApplyMessage } from '@/lib/messaging'
 import { isNoOp } from '@/lib/settings'
 
 /**
@@ -181,49 +181,6 @@ export default defineUnlistedScript(() => {
 			hookGesture()
 			pending = msg
 		}
-	}
-
-	/**
-	 * Parse an inbound payload into an `ApplyMessage`, or null if it isn't one.
-	 *
-	 * Every field is checked, not just the discriminant. `event.source === window`
-	 * is not a trust boundary here: this listener runs in the MAIN world, which we
-	 * share with YouTube's own scripts and any other extension injecting there, so
-	 * a well-formed message can come from something that isn't our content script.
-	 * `processorUrl` is the field that matters most — it goes straight to
-	 * `audioWorklet.addModule`, so it must be an extension URL and nothing else.
-	 */
-	function parseApplyMessage(raw: string): ApplyMessage | null {
-		let parsed: unknown
-		try {
-			parsed = JSON.parse(raw)
-		} catch {
-			return null // The page posts non-JSON strings constantly.
-		}
-		if (typeof parsed !== 'object' || parsed === null) return null
-		const m = parsed as Record<string, unknown>
-		if (m.source !== 'modulate' || m.type !== 'apply') return null
-
-		if (typeof m.processorUrl !== 'string') return null
-		if (!/^(chrome|moz)-extension:\/\//.test(m.processorUrl)) return null
-		if (!isFiniteNumber(m.semitones) || !isFiniteNumber(m.tempo) || !isFiniteNumber(m.overlapMs))
-			return null
-		if (typeof m.quickSeek !== 'boolean') return null
-
-		return {
-			source: 'modulate',
-			type: 'apply',
-			processorUrl: m.processorUrl,
-			semitones: m.semitones,
-			tempo: m.tempo,
-			overlapMs: m.overlapMs,
-			quickSeek: m.quickSeek,
-		}
-	}
-
-	/** Narrow to a finite number — rejects NaN, Infinity, strings and undefined. */
-	function isFiniteNumber(value: unknown): value is number {
-		return typeof value === 'number' && Number.isFinite(value)
 	}
 
 	window.addEventListener('message', (event) => {

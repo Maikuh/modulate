@@ -100,6 +100,8 @@ afterEach(() => {
 
 describe('injected script — payload validation', () => {
 	beforeEach(() => {
+		// Rejected payloads that claim to be ours log a warning; keep the output clean.
+		vi.spyOn(console, 'warn').mockImplementation(() => {})
 		mountVideo()
 		start()
 	})
