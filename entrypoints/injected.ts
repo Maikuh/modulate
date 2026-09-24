@@ -54,13 +54,42 @@ export default defineUnlistedScript(() => {
 		})
 	}
 
-	// Latest apply held back while we wait for a user gesture (see below).
-	let pending: ApplyMessage | null = null
+	// Latest effective settings from the content script: the one desired state.
+	// Every trigger — a new message, a media-event replay, the first-gesture retry
+	// — asks for THIS to be applied, never for a message captured earlier. So a
+	// reset that lands while an older change is still waiting (for a gesture, for
+	// the <video>, for the graph build) cannot be overtaken by that older change.
+	let lastMsg: ApplyMessage | null = null
 	let gestureHooked = false
 
-	// Last effective settings from the content script, replayed when the media
-	// element reloads or YouTube resets it out from under us (see trackVideo).
-	let lastMsg: ApplyMessage | null = null
+	// One worker converges the engine onto `lastMsg`. `dirty` marks that it moved
+	// since the worker last read it; the worker loops until it settles.
+	let dirty = false
+	let draining = false
+
+	/** Ask for `lastMsg` to be (re)applied. Bursts coalesce; the latest always wins. */
+	function schedule(): void {
+		dirty = true
+		if (draining) return
+		draining = true
+		void drain()
+	}
+
+	async function drain(): Promise<void> {
+		while (dirty) {
+			dirty = false
+			const msg = lastMsg
+			if (!msg) continue
+			try {
+				await apply(msg)
+			} catch (err) {
+				console.error('[modulate] audio apply failed', err)
+			}
+		}
+		// Cleared in the same turn the loop exits, so a `schedule()` can never find
+		// `draining` set by a worker that has already stopped reading `dirty`.
+		draining = false
+	}
 
 	// The <video> we've bound lifecycle listeners to. YouTube reuses one element
 	// across most SPA navigations but swaps it for ads/miniplayer; we rebind on swap.
@@ -87,7 +116,7 @@ export default defineUnlistedScript(() => {
 			// is also what stops apply → playbackRate → ratechange → apply looping.
 			if (el.playbackRate === msg.tempo) return
 		}
-		void apply(msg).catch((err) => console.error('[modulate] audio re-apply failed', err))
+		schedule()
 	}
 
 	/** Bind lifecycle listeners to the current <video>, moving them on element swap. */
@@ -98,7 +127,7 @@ export default defineUnlistedScript(() => {
 		for (const type of MEDIA_EVENTS) el.addEventListener(type, onMediaEvent)
 	}
 
-	/** Retry the pending apply once the page sees its first gesture. */
+	/** Re-apply the latest settings once the page sees its first gesture. */
 	function hookGesture(): void {
 		if (gestureHooked) return
 		gestureHooked = true
@@ -108,14 +137,17 @@ export default defineUnlistedScript(() => {
 			// otherwise linger (and re-arming on a later defer would stack them).
 			window.removeEventListener('pointerdown', retry, true)
 			window.removeEventListener('keydown', retry, true)
-			const msg = pending
-			pending = null
-			if (msg) void apply(msg).catch((err) => console.error('[modulate] audio apply failed', err))
+			schedule()
 		}
 		window.addEventListener('pointerdown', retry, { capture: true })
 		window.addEventListener('keydown', retry, { capture: true })
 	}
 
+	/**
+	 * Converge the engine onto `msg`. Only ever called by `drain`, one at a time.
+	 * After each await it bails if `lastMsg` moved meanwhile (`dirty`): the worker
+	 * loops straight on to the newer message, so a stale one is never applied.
+	 */
 	async function apply(msg: ApplyMessage): Promise<void> {
 		if (isNoOp(msg)) {
 			// Lazy capture: leave the <video> untouched until a real change (transpose or
@@ -145,18 +177,18 @@ export default defineUnlistedScript(() => {
 		// pointerdown/keydown in the page itself.
 		//
 		// When the activation API is unavailable (older Firefox) we can't tell, so we
-		// fall through and build as before. Once a graph exists, re-applies are cheap.
+		// fall through and build anyway. Once a graph exists, re-applies are cheap.
 		const ua = navigator.userActivation
 		if (!audioEngine.hasGraph && ua && !ua.hasBeenActive) {
-			pending = msg
 			hookGesture()
 			return
 		}
 
 		const el = await waitForVideo()
+		if (dirty) return
 		if (!el) {
-			// Ten seconds with no <video>. Nothing re-triggers us either: the media
-			// events we replay from are bound to an element that never existed.
+			// Ten seconds with no <video>. The media-event replay can't fire (no element
+			// was ever bound); only the next message from the content script retries.
 			console.warn('[modulate] no <video> found; settings not applied')
 			return
 		}
@@ -169,6 +201,7 @@ export default defineUnlistedScript(() => {
 			quickSeek: msg.quickSeek,
 		})
 		await audioEngine.ensureGraph(el, msg.processorUrl)
+		if (dirty) return
 		audioEngine.apply({ semitones: msg.semitones, tempo: msg.tempo })
 		// Best-effort: the gate above means we normally arrive with activation, but
 		// the older-Firefox fallthrough can reach here without it, in which case the
@@ -177,7 +210,6 @@ export default defineUnlistedScript(() => {
 		if (!audioEngine.running) {
 			console.warn('[modulate] audio context did not resume; click the page to start audio')
 			hookGesture()
-			pending = msg
 		}
 	}
 
@@ -187,9 +219,8 @@ export default defineUnlistedScript(() => {
 		const msg = parseApplyMessage(event.data)
 		if (!msg) return
 
-		// Remember the latest desired state so media-lifecycle events can replay it.
 		lastMsg = msg
-		void apply(msg).catch((err) => console.error('[modulate] audio apply failed', err))
+		schedule()
 	})
 
 	// Close the AudioContext on real unload only. Skipping bfcache (`persisted`)

@@ -61,19 +61,24 @@ async function tick(times = 6) {
  *
  * Every `main()` call builds a fresh closure but adds another 'message' listener
  * to the same shared happy-dom window. Left in place, a later test's post would
- * drive every previous instance too and inflate the spy counts.
+ * drive every previous instance too and inflate the spy counts. The recording
+ * stays on for the whole test, not just `main()`: the first-gesture retry
+ * listeners are added later, from inside an apply, and would otherwise outlive
+ * the test holding a stale instance.
  */
 let teardown: Array<() => void> = []
+let recording: { mockRestore(): void } | null = null
 function start() {
-	const added = window.addEventListener.bind(window)
-	const spy = vi
-		.spyOn(window, 'addEventListener')
-		.mockImplementation((type, fn: EventListenerOrEventListenerObject, opts) => {
-			teardown.push(() => window.removeEventListener(type, fn, opts))
-			added(type, fn, opts)
-		})
+	if (!recording) {
+		const added = window.addEventListener.bind(window)
+		recording = vi
+			.spyOn(window, 'addEventListener')
+			.mockImplementation((type, fn: EventListenerOrEventListenerObject, opts) => {
+				teardown.push(() => window.removeEventListener(type, fn, opts))
+				added(type, fn, opts)
+			})
+	}
 	injected.main()
-	spy.mockRestore()
 }
 
 /** Put a player element on the page. */
@@ -88,10 +93,17 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	engine.hasGraph = false
 	engine.running = true
+	// Like the real engine, a completed build means a graph exists. A hand-set flag
+	// alone lets the tests describe states the script can never actually reach.
+	engine.ensureGraph.mockImplementation(async () => {
+		engine.hasGraph = true
+	})
 	document.body.innerHTML = ''
 })
 
 afterEach(() => {
+	recording?.mockRestore()
+	recording = null
 	teardown.forEach((off) => off())
 	teardown = []
 	document.body.innerHTML = ''
@@ -237,7 +249,7 @@ describe('injected script — media lifecycle replay', () => {
 
 		// This guard is what stops apply → playbackRate → ratechange → apply from
 		// looping on the audio thread.
-		it('ignores the ratechange our own applyTempo caused', async () => {
+		it('ignores the ratechange our own tempo apply caused', async () => {
 			video.playbackRate = 1.5 // already what we asked for
 			video.dispatchEvent(new Event('ratechange'))
 			await tick()
@@ -357,5 +369,175 @@ describe('injected script — user activation gate', () => {
 
 		await post(message({ semitones: 4 }))
 		expect(engine.ensureGraph).toHaveBeenCalledOnce()
+	})
+})
+
+describe('injected script — latest settings win', () => {
+	const activation = (hasBeenActive: boolean) => {
+		Object.defineProperty(navigator, 'userActivation', {
+			value: { hasBeenActive, isActive: hasBeenActive },
+			configurable: true,
+		})
+	}
+
+	afterEach(() => Reflect.deleteProperty(navigator, 'userActivation'))
+
+	// Set +4 on an autoplaying page nobody clicked, press Reset, then click: the
+	// click must apply the reset, not the change it replaced.
+	it('does not replay a queued change the user has since reset', async () => {
+		activation(false)
+		mountVideo()
+		start()
+
+		await post(message({ semitones: 4 }))
+		await post(message())
+		activation(true)
+		window.dispatchEvent(new Event('pointerdown'))
+		await tick()
+
+		expect(engine.ensureGraph).not.toHaveBeenCalled()
+		expect(engine.apply).not.toHaveBeenCalledWith(expect.objectContaining({ semitones: 4 }))
+	})
+
+	it('applies the newest change on the first gesture', async () => {
+		activation(false)
+		mountVideo()
+		start()
+
+		await post(message({ semitones: 4 }))
+		await post(message({ semitones: 6 }))
+		activation(true)
+		window.dispatchEvent(new Event('keydown'))
+		await tick()
+
+		expect(engine.apply).toHaveBeenCalledOnce()
+		expect(engine.apply).toHaveBeenCalledWith({ semitones: 6, tempo: 1 })
+	})
+
+	// A reset arriving while the first build is still in flight used to return
+	// early (no graph yet), and the older +4 then landed once the build finished.
+	it('does not let an in-flight build apply settings that were since reset', async () => {
+		mountVideo()
+		start()
+		let release!: () => void
+		engine.ensureGraph.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					release = () => {
+						engine.hasGraph = true
+						resolve()
+					}
+				}),
+		)
+
+		await post(message({ semitones: 4 }))
+		await post(message())
+		release()
+		await tick()
+
+		expect(engine.apply).not.toHaveBeenCalledWith(expect.objectContaining({ semitones: 4 }))
+		expect(engine.apply).toHaveBeenLastCalledWith({ semitones: 0, tempo: 1 })
+	})
+
+	it('runs one apply at a time and ends on the latest message', async () => {
+		mountVideo()
+		start()
+		let release!: () => void
+		engine.ensureGraph.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					release = () => {
+						engine.hasGraph = true
+						resolve()
+					}
+				}),
+		)
+
+		await post(message({ semitones: 1 }))
+		await post(message({ semitones: 2 }))
+		await post(message({ semitones: 3 }))
+		release()
+		await tick()
+
+		expect(engine.apply).toHaveBeenCalledOnce()
+		expect(engine.apply).toHaveBeenCalledWith({ semitones: 3, tempo: 1 })
+	})
+})
+
+describe('injected script — waiting for the player', () => {
+	it('applies once a late-mounting <video> appears', async () => {
+		start()
+		await post(message({ semitones: 2 }))
+		expect(engine.ensureGraph).not.toHaveBeenCalled()
+
+		const el = mountVideo()
+		await tick()
+
+		expect(engine.ensureGraph).toHaveBeenCalledWith(el, PROCESSOR_URL)
+	})
+
+	it('gives up with a warning when no <video> ever appears', async () => {
+		vi.useFakeTimers()
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+		try {
+			start()
+			window.dispatchEvent(
+				new MessageEvent('message', {
+					data: JSON.stringify(message({ semitones: 2 })),
+					source: window,
+				}),
+			)
+			await vi.advanceTimersByTimeAsync(10_000)
+
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining('no <video> found'))
+			expect(engine.ensureGraph).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+})
+
+describe('injected script — context that will not start', () => {
+	// The older-Firefox fallthrough can build without activation; the captured
+	// element then plays silently until a gesture lets the context resume.
+	it('warns and retries on the next gesture', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+		engine.running = false
+		mountVideo()
+		start()
+
+		await post(message({ semitones: 3 }))
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('did not resume'))
+
+		engine.running = true
+		vi.clearAllMocks()
+		window.dispatchEvent(new Event('pointerdown'))
+		await tick()
+
+		expect(engine.resume).toHaveBeenCalled()
+		expect(engine.apply).toHaveBeenCalledWith({ semitones: 3, tempo: 1 })
+	})
+})
+
+describe('injected script — pagehide', () => {
+	beforeEach(() => start())
+
+	/** happy-dom's PageTransitionEvent ignores the `persisted` init field. */
+	function pagehide(persisted: boolean): Event {
+		const event = new Event('pagehide')
+		Object.defineProperty(event, 'persisted', { value: persisted })
+		return event
+	}
+
+	// Disposing into bfcache closes the context; on the way back the same <video>
+	// cannot be captured again and stays muted.
+	it('keeps the graph when the page enters bfcache', () => {
+		window.dispatchEvent(pagehide(true))
+		expect(engine.dispose).not.toHaveBeenCalled()
+	})
+
+	it('disposes the graph on a real unload', () => {
+		window.dispatchEvent(pagehide(false))
+		expect(engine.dispose).toHaveBeenCalledOnce()
 	})
 })
