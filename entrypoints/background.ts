@@ -1,5 +1,5 @@
 import type { BadgeMessage, PopupMessage } from '@/lib/messaging'
-import { TEMPO_STEP } from '@/lib/storage'
+import { TEMPO_STEP, isNoOp } from '@/lib/settings'
 
 /** Keyboard `commands` → the `PopupMessage` to send the active tab's content script. */
 const COMMAND_MESSAGES: Record<string, PopupMessage> = {
@@ -69,8 +69,7 @@ export default defineBackground(() => {
 		// Badge stays compact: negative pitch keeps its `-`, positive drops the `+`.
 		// Tempo-only gets a glyph rather than the number — the badge fits roughly four
 		// characters, and "1.25" leaves no room to also signal what it means.
-		const text =
-			message.semitones !== 0 ? String(message.semitones) : message.tempo !== 1 ? '♪' : ''
+		const text = isNoOp(message) ? '' : message.semitones !== 0 ? String(message.semitones) : '♪'
 		// Both reject with "No tab with id" if the tab closed between the content
 		// script's send and this handler; unhandled, that surfaces as a service-worker
 		// error with no context.

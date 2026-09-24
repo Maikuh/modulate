@@ -1,8 +1,9 @@
 import { SoundTouchNode } from '@soundtouchjs/audio-worklet'
 
-// Side-effect-free module — safe to pull the value into the MAIN-world bundle,
-// unlike `storage.ts` which touches extension APIs unavailable in the page realm.
+// Side-effect-free modules — safe to pull into the MAIN-world bundle, unlike
+// `storage.ts` which touches extension APIs unavailable in the page realm.
 import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality'
+import { isNoOp } from '@/lib/settings'
 
 /**
  * Owns the Web Audio graph that pitch-shifts and time-stretches a single media
@@ -60,7 +61,7 @@ class AudioEngine {
 	 * through continuous WSOLA processing even when untouched — needless CPU.
 	 */
 	private get bypassed(): boolean {
-		return this.semitones === 0 && this.tempo === 1
+		return isNoOp({ semitones: this.semitones, tempo: this.tempo })
 	}
 
 	/**

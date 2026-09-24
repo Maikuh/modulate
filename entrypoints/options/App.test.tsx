@@ -3,13 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 
-import {
-	globalEnabled,
-	audioQuality,
-	setVideoSetting,
-	listVideoSettings,
-	DEFAULT_AUDIO_QUALITY,
-} from '@/lib/storage'
+import { DEFAULT_AUDIO_QUALITY } from '@/lib/audioQuality'
+import { globalEnabled, audioQuality, setVideoSetting, listVideoSettings } from '@/lib/storage'
 
 import App from './App'
 

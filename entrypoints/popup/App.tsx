@@ -3,7 +3,7 @@ import { useEffect } from 'preact/hooks'
 
 import { Logo, PitchIcon, TempoIcon, ResetIcon, GearIcon } from '@/lib/icons'
 import type { PlayerState, PopupMessage } from '@/lib/messaging'
-import { MIN_SEMITONES, MAX_SEMITONES, MIN_TEMPO, MAX_TEMPO, TEMPO_STEP } from '@/lib/storage'
+import { MIN_SEMITONES, MAX_SEMITONES, MIN_TEMPO, MAX_TEMPO, TEMPO_STEP } from '@/lib/settings'
 
 import { ControlRow } from './components/ControlRow'
 import { Toggle } from './components/Toggle'

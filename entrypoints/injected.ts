@@ -1,5 +1,6 @@
 import { audioEngine } from '@/lib/audioEngine'
 import type { ApplyMessage } from '@/lib/messaging'
+import { isNoOp } from '@/lib/settings'
 
 /**
  * Runs in the page's MAIN world (injected by the content script). Owns the Web
@@ -116,7 +117,7 @@ export default defineUnlistedScript(() => {
 	}
 
 	async function apply(msg: ApplyMessage): Promise<void> {
-		if (msg.semitones === 0 && msg.tempo === 1) {
+		if (isNoOp(msg)) {
 			// Lazy capture: leave the <video> untouched until a real change (transpose or
 			// tempo) is asked for. `createMediaElementSource` is irreversible and reroutes
 			// ALL audio through Web Audio — capturing for a no-op needlessly exposes

@@ -11,10 +11,10 @@ import {
 } from '@/lib/audioQuality'
 import { formatSemitones } from '@/lib/format'
 import { Logo, PowerIcon, SlidersIcon, FilmIcon, TrashIcon } from '@/lib/icons'
+import type { VideoSetting } from '@/lib/settings'
 import {
 	globalEnabled,
 	audioQuality,
-	type VideoSetting,
 	listVideoSettings,
 	removeVideoSetting,
 	clearVideoSettings,

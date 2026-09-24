@@ -1,14 +1,8 @@
 import { storage } from 'wxt/utils/storage'
 
 import type { ApplyMessage, BadgeMessage, PopupMessage, PlayerState } from '@/lib/messaging'
-import {
-	globalEnabled,
-	audioQuality,
-	getRawVideoSetting,
-	setVideoSetting,
-	resolveSetting,
-	DEFAULT_VIDEO_SETTING,
-} from '@/lib/storage'
+import { DEFAULT_VIDEO_SETTING, resolveSetting } from '@/lib/settings'
+import { globalEnabled, audioQuality, getRawVideoSetting, setVideoSetting } from '@/lib/storage'
 import { getVideoId, getVideoTitle } from '@/lib/youtube'
 
 export default defineContentScript({
@@ -45,9 +39,9 @@ export default defineContentScript({
 			return {
 				videoId: getVideoId(location.href),
 				globalEnabled: true,
-				enabled: true,
-				semitones: 0,
-				tempo: 1,
+				enabled: DEFAULT_VIDEO_SETTING.enabled,
+				semitones: DEFAULT_VIDEO_SETTING.semitones,
+				tempo: DEFAULT_VIDEO_SETTING.tempo,
 			}
 		}
 
@@ -58,12 +52,12 @@ export default defineContentScript({
 			const base: PlayerState = { ...baseState(), globalEnabled: global }
 			if (!videoId) return base
 
-			const setting = await getRawVideoSetting(videoId)
+			const setting = (await getRawVideoSetting(videoId)) ?? DEFAULT_VIDEO_SETTING
 			return {
 				...base,
-				enabled: setting?.enabled ?? DEFAULT_VIDEO_SETTING.enabled,
-				semitones: setting?.semitones ?? 0,
-				tempo: setting?.tempo ?? 1,
+				enabled: setting.enabled,
+				semitones: setting.semitones,
+				tempo: setting.tempo,
 			}
 		}
 

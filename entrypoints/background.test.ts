@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 
 import type { BadgeMessage } from '@/lib/messaging'
-import { TEMPO_STEP } from '@/lib/storage'
+import { TEMPO_STEP } from '@/lib/settings'
 
 import background from './background'
 

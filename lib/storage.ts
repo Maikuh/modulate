@@ -1,63 +1,13 @@
 import { storage } from 'wxt/utils/storage'
 
 import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality'
-
-// Re-export so existing `@/lib/storage` consumers keep working.
-export { DEFAULT_AUDIO_QUALITY, type AudioQuality }
-
-/** Persisted transpose settings for a single video. */
-export interface VideoSetting {
-	/** Per-video enable toggle. */
-	enabled: boolean
-	/** Pitch shift in semitones. */
-	semitones: number
-	/** Playback rate (1 = original speed); pitch is held constant. */
-	tempo: number
-	/**
-	 * Human-readable video title, captured from the watch page at save time so
-	 * the options list is readable. Optional: legacy entries (and any saved
-	 * before the title resolved) fall back to the video ID.
-	 */
-	title?: string
-}
-
-export const DEFAULT_VIDEO_SETTING: VideoSetting = {
-	enabled: true,
-	semitones: 0,
-	tempo: 1,
-}
-
-/** Range clamp for the semitone stepper (±12 = one octave). */
-export const MIN_SEMITONES = -12
-export const MAX_SEMITONES = 12
-
-/** Range clamp for the tempo stepper. */
-export const MIN_TEMPO = 0.5
-export const MAX_TEMPO = 2
-export const TEMPO_STEP = 0.05
-
-/**
- * Clamp helpers — keep the same rounding everywhere a value is persisted.
- *
- * The `Number.isFinite` guards are load-bearing, not defensive noise: `NaN`
- * survives both `Math.round` and `Math.min`/`Math.max` unchanged, so without them
- * a `NaN` reaches `element.playbackRate` and `AudioParam.value`, which are
- * restricted floats and throw `TypeError`. That throw lands mid-reroute in
- * `AudioEngine.route()`, between the disconnect and the reconnect, leaving the
- * video permanently muted. They also reject non-numbers outright, which is what
- * a hand-edited or version-skewed storage entry looks like.
- */
-export function clampSemitones(n: number): number {
-	if (!Number.isFinite(n)) return DEFAULT_VIDEO_SETTING.semitones
-	return Math.max(MIN_SEMITONES, Math.min(MAX_SEMITONES, Math.round(n)))
-}
-
-export function clampTempo(n: number): number {
-	if (!Number.isFinite(n)) return DEFAULT_VIDEO_SETTING.tempo
-	// Round to the step grid so float drift from repeated nudges can't accumulate.
-	const snapped = Math.round(n / TEMPO_STEP) * TEMPO_STEP
-	return Math.max(MIN_TEMPO, Math.min(MAX_TEMPO, Number(snapped.toFixed(2))))
-}
+import {
+	DEFAULT_VIDEO_SETTING,
+	clampSemitones,
+	clampTempo,
+	isNoOp,
+	type VideoSetting,
+} from '@/lib/settings'
 
 /**
  * Force a stored entry onto the valid ranges. Applied on every read AND every
@@ -66,14 +16,19 @@ export function clampTempo(n: number): number {
  * in `chrome.storage.local` — written by an older version, edited from devtools,
  * or (on the ROADMAP) synced from another device — arrives typed as a
  * `VideoSetting` without ever having been one.
+ *
+ * Built field by field rather than spread: a spread would carry unknown keys back
+ * into storage forever, and an unchecked non-string `title` makes Preact throw
+ * while rendering the options list.
  */
 function normalize(setting: VideoSetting): VideoSetting {
-	return {
-		...setting,
+	const out: VideoSetting = {
 		enabled: setting.enabled !== false,
 		semitones: clampSemitones(setting.semitones),
 		tempo: clampTempo(setting.tempo),
 	}
+	if (typeof setting.title === 'string') out.title = setting.title
+	return out
 }
 
 /** Global master switch. When off, every video plays untransposed. */
@@ -91,7 +46,11 @@ export const audioQuality = storage.defineItem<AudioQuality>('local:audioQuality
 	fallback: DEFAULT_AUDIO_QUALITY,
 })
 
-/** Whether an explicit per-video entry exists (distinct from the merged default). */
+/**
+ * The stored entry for `videoId`, merged over the defaults and normalized, or
+ * `undefined` when none is stored. `resolveSetting` relies on that distinction:
+ * no entry means the no-op, while an entry is applied as stored.
+ */
 export async function getRawVideoSetting(videoId: string): Promise<VideoSetting | undefined> {
 	const all = await videoSettings.getValue()
 	return all[videoId] ? normalize({ ...DEFAULT_VIDEO_SETTING, ...all[videoId] }) : undefined
@@ -152,38 +111,4 @@ export async function removeVideoSetting(videoId: string): Promise<void> {
 
 export async function clearVideoSettings(): Promise<void> {
 	await videoSettings.setValue({})
-}
-
-/** Resolved values actually applied to audio after layering all the toggles. */
-export interface ResolvedSetting {
-	semitones: number
-	tempo: number
-}
-
-/**
- * "Leave the audio alone": no transpose, original speed. Frozen because it is
- * handed straight back to callers, and one stray mutation would silently retune
- * every untouched video.
- */
-export const NO_OP: Readonly<ResolvedSetting> = Object.freeze({ semitones: 0, tempo: 1 })
-
-/**
- * Whether a setting asks for nothing. Load-bearing in several senses that are
- * easy to drift apart when spelled out inline: it decides whether an entry is
- * worth storing, whether the audio graph bypasses its worklet, and whether the
- * toolbar shows a badge.
- */
-export function isNoOp(setting: ResolvedSetting): boolean {
-	return setting.semitones === NO_OP.semitones && setting.tempo === NO_OP.tempo
-}
-
-/**
- * Resolve the values actually applied to audio. An explicit per-video setting
- * applies; otherwise the no-op (0 / 1×). The global master switch and the
- * per-video `enabled` toggle gate everything — when either is off the result is
- * the no-op so the video plays untransposed.
- */
-export function resolveSetting(global: boolean, video: VideoSetting | undefined): ResolvedSetting {
-	if (!global || !video?.enabled) return { ...NO_OP }
-	return { semitones: video.semitones, tempo: video.tempo }
 }
