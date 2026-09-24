@@ -3,7 +3,7 @@ import { SoundTouchNode } from '@soundtouchjs/audio-worklet'
 // Side-effect-free modules — safe to pull into the MAIN-world bundle, unlike
 // `storage.ts` which touches extension APIs unavailable in the page realm.
 import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality'
-import { isNoOp } from '@/lib/settings'
+import { isNoOp, type ResolvedSetting } from '@/lib/settings'
 
 /**
  * Owns the Web Audio graph that pitch-shifts and time-stretches a single media
@@ -40,9 +40,21 @@ class AudioEngine {
 	private source: MediaElementAudioSourceNode | null = null
 	private node: SoundTouchNode | null = null
 	private element: HTMLMediaElement | null = null
-	private building: Promise<void> | null = null
-	/** Which element the in-flight `building` promise is capturing, if any. */
-	private buildingFor: HTMLMediaElement | null = null
+	/** The in-flight build, and the element it is capturing. */
+	private building: { el: HTMLMediaElement; promise: Promise<void> } | null = null
+	/**
+	 * Every element this engine has ever captured. Capture is per document, not per
+	 * context, so an element whose context was disposed (YouTube swapped it out, then
+	 * back in) can never be captured again — checked up front so that case fails
+	 * with a message that says so, instead of churning a context per retry into a
+	 * generic `InvalidStateError`.
+	 */
+	private captured = new WeakSet<HTMLMediaElement>()
+	/**
+	 * The worklet raised `processorerror`: it outputs silence from then on, so the
+	 * graph stays bypassed until an element swap builds a fresh one.
+	 */
+	private failed = false
 	private semitones = 0
 	private tempo = 1
 	private quality: AudioQuality = { ...DEFAULT_AUDIO_QUALITY }
@@ -58,10 +70,11 @@ class AudioEngine {
 	 * The graph is bypassed (source wired straight to speakers) at the no-op:
 	 * no transpose AND original speed. Bypassing matters because
 	 * `createMediaElementSource` is one-shot, so without it every video runs
-	 * through continuous WSOLA processing even when untouched — needless CPU.
+	 * through continuous WSOLA processing even when untouched — needless CPU. A
+	 * crashed worklet is bypassed too, since routing through it is silence.
 	 */
 	private get bypassed(): boolean {
-		return isNoOp({ semitones: this.semitones, tempo: this.tempo })
+		return this.failed || isNoOp({ semitones: this.semitones, tempo: this.tempo })
 	}
 
 	/**
@@ -73,31 +86,37 @@ class AudioEngine {
 
 		if (this.building) {
 			// Join an in-flight build only when it is capturing the same element.
-			if (this.buildingFor === el) return this.building
+			if (this.building.el === el) return this.building.promise
 			// Otherwise YouTube swapped the <video> mid-build. Returning the in-flight
 			// promise would resolve "successfully" while the graph points at the OLD
 			// element — the caller then applies pitch/tempo to an element that is no
 			// longer playing, and the one that is stays uncaptured until some unrelated
 			// later apply happens to rebuild. Let it settle, then build for real.
-			await this.building.catch(() => {})
+			await this.building.promise.catch(() => {})
 			return this.ensureGraph(el, processorUrl)
 		}
 
-		this.buildingFor = el
-		this.building = this.build(el, processorUrl).finally(() => {
+		const promise = this.build(el, processorUrl).finally(() => {
 			this.building = null
-			this.buildingFor = null
 		})
-		return this.building
+		this.building = { el, promise }
+		return promise
 	}
 
 	private async build(el: HTMLMediaElement, processorUrl: string): Promise<void> {
 		// YouTube sometimes swaps the <video> element (ads, miniplayer↔watch). A new
 		// element falls past the ensureGraph guard into a rebuild — close the prior
 		// context first, or each swap leaks an AudioContext. Browsers cap the number
-		// of live contexts (~6 in Chrome); past the cap `new AudioContext()` throws
-		// and audio dies. Closing also releases the old element back to direct output.
+		// of live contexts; past the cap `new AudioContext()` throws and audio dies.
+		// Closing does NOT hand the old element back to direct output (its output is
+		// just ignored from then on), which is why the swap has to build a new graph.
 		await this.dispose()
+
+		if (this.captured.has(el)) {
+			throw new Error(
+				'this <video> was captured by an earlier audio graph and cannot be captured again; reload the page',
+			)
+		}
 
 		// 'playback' over the default 'interactive': a larger output buffer gives the
 		// SoundTouch WSOLA pipeline more slack to fill each render quantum. At the tiny
@@ -112,26 +131,40 @@ class AudioEngine {
 		// the URL poll, three storage watchers), leaking one per attempt would burn
 		// through the cap in seconds and take audio down for the rest of the page.
 		this.ctx = ctx
+		let node: SoundTouchNode
+		let source: MediaElementAudioSourceNode
 		try {
 			await SoundTouchNode.register(ctx, processorUrl)
 
-			const node = new SoundTouchNode({ context: ctx })
+			node = new SoundTouchNode({ context: ctx })
 			// Apply the user-tunable WSOLA timing. `quickSeek: false` runs the full
 			// cross-correlation search per overlap-add splice instead of the fast
 			// approximation; a wider `overlapMs` lengthens the crossfade between splices,
 			// hiding discontinuities. Tradeoff is CPU and a touch more smearing — exposed
 			// in the options page so users can trade artifacts against CPU.
 			node.setStretchParameters(this.quality)
-			const source = ctx.createMediaElementSource(el)
-
-			this.node = node
-			this.source = source
-			this.element = el
-			this.route()
+			source = ctx.createMediaElementSource(el)
 		} catch (err) {
 			await this.dispose()
 			throw err
 		}
+
+		// Captured. From here on the element outputs ONLY through this context, so no
+		// failure past this point may dispose it: a closed context ignores the
+		// element's output and the element can never be captured again — the video
+		// would stay muted until a reload. Keep the graph; `route()` falls back to the
+		// bypass wiring on a throw, which keeps the video audible.
+		this.captured.add(el)
+		this.node = node
+		this.source = source
+		this.element = el
+		node.addEventListener('processorerror', (event) => {
+			if (this.node !== node) return
+			console.error('[modulate] audio worklet crashed; bypassing it', event)
+			this.failed = true
+			this.route()
+		})
+		this.route()
 	}
 
 	/**
@@ -163,6 +196,14 @@ class AudioEngine {
 			// and a captured element can no longer fall back to direct output, so a
 			// throw here would mute the video permanently with no recovery short of a
 			// reload. Fall back to the bypass wiring, then rethrow.
+			//
+			// Record the no-op as the current state, so it matches that wiring. Left at
+			// the rejected values, a later change that stays on the same side of the
+			// bypass boundary would skip `route()` and drive the element's rate with
+			// pitch preservation off while nothing compensates it.
+			this.semitones = 0
+			this.tempo = 1
+			this.releaseRate()
 			this.source.disconnect()
 			this.source.connect(this.ctx.destination)
 			throw err
@@ -172,6 +213,13 @@ class AudioEngine {
 	/** Push the current params into the live graph without re-routing (no seam). */
 	private applyLive(): void {
 		if (!this.node) return
+		if (this.bypassed) {
+			// Only reachable here with a crashed worklet (a no-op keeps tempo at 1, which
+			// releases the rate below anyway). Nothing compensates pitch, so the rate stays
+			// the page's.
+			this.releaseRate()
+			return
+		}
 		this.node.pitchSemitones.value = this.semitones
 		this.node.playbackRate.value = this.tempo
 		if (!this.element) return
@@ -235,18 +283,15 @@ class AudioEngine {
 		return this.ctx?.state === 'running'
 	}
 
-	/** Apply pitch shift in semitones (tempo untouched). */
-	applySemitones(semitones: number): void {
+	/**
+	 * Apply pitch (semitones) and/or playback rate (1 = original; pitch is
+	 * compensated by the worklet). Setting both in one call re-routes at most once,
+	 * and each re-route is an audible seam.
+	 */
+	apply(setting: Partial<ResolvedSetting>): void {
 		const was = this.bypassed
-		this.semitones = semitones
-		if (was !== this.bypassed) this.route()
-		else this.applyLive()
-	}
-
-	/** Apply playback rate (1 = original); pitch is compensated by the worklet. */
-	applyTempo(tempo: number): void {
-		const was = this.bypassed
-		this.tempo = tempo
+		if (setting.semitones !== undefined) this.semitones = setting.semitones
+		if (setting.tempo !== undefined) this.tempo = setting.tempo
 		if (was !== this.bypassed) this.route()
 		else this.applyLive()
 	}
@@ -257,11 +302,22 @@ class AudioEngine {
 		this.node?.setStretchParameters(quality)
 	}
 
-	/** Resume the context from a user gesture; harmless if already running. */
-	async resume(): Promise<void> {
-		if (this.ctx && this.ctx.state !== 'running') {
-			await this.ctx.resume()
-		}
+	/**
+	 * Try to start the context; harmless if already running. Bounded: a context the
+	 * autoplay policy won't start leaves `resume()` pending — per spec it neither
+	 * resolves nor rejects until the page gets activation — and an unbounded await
+	 * would hang the caller, and every apply queued behind it. Callers check
+	 * `running` afterwards rather than trusting this to have succeeded.
+	 */
+	async resume(timeoutMs = 250): Promise<void> {
+		const ctx = this.ctx
+		if (!ctx || ctx.state === 'running') return
+		let timer: ReturnType<typeof setTimeout> | undefined
+		const settled = ctx
+			.resume()
+			.catch((err) => console.warn('[modulate] audio context resume failed', err))
+		await Promise.race([settled, new Promise<void>((r) => (timer = setTimeout(r, timeoutMs)))])
+		clearTimeout(timer)
 	}
 
 	/**
@@ -280,6 +336,7 @@ class AudioEngine {
 		this.node = null
 		this.source = null
 		this.element = null
+		this.failed = false
 		if (ctx && ctx.state !== 'closed') {
 			// A close that silently fails is what drives the context cap to exhaustion,
 			// after which `new AudioContext()` throws and audio is dead for the page.

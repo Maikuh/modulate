@@ -13,7 +13,7 @@ class FakeAudioParam {
 	value = 0
 }
 
-class FakeNode {
+class FakeNode extends EventTarget {
 	readonly outputs = new Set<FakeNode>()
 
 	connect(target: FakeNode): FakeNode {
@@ -152,8 +152,8 @@ describe('AudioEngine — routing', () => {
 		const engine = await freshEngine()
 		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
 
-		engine.applySemitones(0)
-		engine.applyTempo(1)
+		engine.apply({ semitones: 0 })
+		engine.apply({ tempo: 1 })
 
 		expect(currentSource().reaches(currentCtx().destination)).toBe(true)
 	})
@@ -161,7 +161,7 @@ describe('AudioEngine — routing', () => {
 	it('routes through the worklet when transposing', async () => {
 		const engine = await freshEngine()
 		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
-		engine.applySemitones(5)
+		engine.apply({ semitones: 5 })
 
 		const source = currentSource()
 		expect(source.reaches(currentCtx().destination)).toBe(true)
@@ -177,10 +177,10 @@ describe('AudioEngine — routing', () => {
 		const { destination } = currentCtx()
 
 		for (const step of [
-			() => engine.applySemitones(4),
-			() => engine.applySemitones(0),
-			() => engine.applyTempo(1.5),
-			() => engine.applyTempo(1),
+			() => engine.apply({ semitones: 4 }),
+			() => engine.apply({ semitones: 0 }),
+			() => engine.apply({ tempo: 1.5 }),
+			() => engine.apply({ tempo: 1 }),
 		]) {
 			step()
 			expect(source.reaches(destination)).toBe(true)
@@ -204,16 +204,76 @@ describe('AudioEngine — routing', () => {
 			configurable: true,
 		})
 
-		expect(() => engine.applyTempo(1.5)).toThrow(TypeError)
+		expect(() => engine.apply({ tempo: 1.5 })).toThrow(TypeError)
 		expect(source.reaches(currentCtx().destination)).toBe(true)
+	})
+
+	// After the fallback the source bypasses the worklet. Had the engine kept the
+	// rejected values, a later change on the same side of the bypass boundary would
+	// skip route() and leave the worklet disconnected while still time-stretching.
+	it('records the no-op after a failed route, so the next change re-routes', async () => {
+		const engine = await freshEngine()
+		const el = makeVideo()
+		await engine.ensureGraph(el, PROCESSOR_URL)
+		const worklet = currentWorklet()
+		const setRate = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'playbackRate')
+		let fail = true
+		Object.defineProperty(el, 'playbackRate', {
+			set(v: number) {
+				if (fail) throw new TypeError('rejected')
+				setRate?.set?.call(el, v)
+			},
+			get: () => setRate?.get?.call(el) as number,
+			configurable: true,
+		})
+
+		expect(() => engine.apply({ tempo: 1.5 })).toThrow(TypeError)
+		fail = false
+		engine.apply({ tempo: 1.25 })
+
+		expect(currentSource().outputs.has(worklet)).toBe(true)
+		expect(el.preservesPitch).toBe(false)
+	})
+
+	it('sets pitch and tempo together with a single re-route', async () => {
+		const engine = await freshEngine()
+		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+		const disconnect = vi.spyOn(currentSource(), 'disconnect')
+
+		engine.apply({ semitones: 3, tempo: 1.5 })
+
+		expect(disconnect).toHaveBeenCalledOnce()
+		expect(currentWorklet().pitchSemitones.value).toBe(3)
+		expect(currentWorklet().playbackRate.value).toBe(1.5)
+	})
+
+	// A crashed worklet outputs silence forever. Routing around it keeps the video
+	// audible (untransposed) instead of muted until a reload.
+	it('bypasses a worklet that raised processorerror, and stays bypassed', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {})
+		const engine = await freshEngine()
+		const el = makeVideo()
+		await engine.ensureGraph(el, PROCESSOR_URL)
+		engine.apply({ semitones: 4, tempo: 1.5 })
+
+		currentWorklet().dispatchEvent(new Event('processorerror'))
+
+		const { destination } = currentCtx()
+		expect(currentSource().outputs.has(destination)).toBe(true)
+		expect(el.preservesPitch).toBe(true)
+		expect(el.playbackRate).toBe(1)
+
+		engine.apply({ semitones: 5, tempo: 1.25 })
+		expect(currentSource().outputs.has(destination)).toBe(true)
+		expect(el.playbackRate).toBe(1)
 	})
 
 	it('pushes pitch and tempo into the worklet params', async () => {
 		const engine = await freshEngine()
 		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
 
-		engine.applySemitones(-3)
-		engine.applyTempo(0.75)
+		engine.apply({ semitones: -3 })
+		engine.apply({ tempo: 0.75 })
 
 		expect(currentWorklet().pitchSemitones.value).toBe(-3)
 		expect(currentWorklet().playbackRate.value).toBe(0.75)
@@ -226,10 +286,10 @@ describe('AudioEngine — element rate ownership', () => {
 		const el = makeVideo()
 		await engine.ensureGraph(el, PROCESSOR_URL)
 
-		engine.applySemitones(5) // pitch only, tempo still 1
+		engine.apply({ semitones: 5 }) // pitch only, tempo still 1
 		expect(el.preservesPitch).toBe(true)
 
-		engine.applyTempo(1.5)
+		engine.apply({ tempo: 1.5 })
 		expect(el.preservesPitch).toBe(false)
 		expect(el.playbackRate).toBe(1.5)
 	})
@@ -242,9 +302,9 @@ describe('AudioEngine — element rate ownership', () => {
 		const el = makeVideo()
 		await engine.ensureGraph(el, PROCESSOR_URL)
 
-		engine.applySemitones(5)
+		engine.apply({ semitones: 5 })
 		el.playbackRate = 2 // the viewer picks 2x in the player
-		engine.applySemitones(6) // another pitch nudge must not stomp it
+		engine.apply({ semitones: 6 }) // another pitch nudge must not stomp it
 
 		expect(el.playbackRate).toBe(2)
 		expect(el.preservesPitch).toBe(true)
@@ -255,14 +315,14 @@ describe('AudioEngine — element rate ownership', () => {
 		const el = makeVideo()
 		await engine.ensureGraph(el, PROCESSOR_URL)
 
-		engine.applyTempo(1.5)
+		engine.apply({ tempo: 1.5 })
 		expect(el.playbackRate).toBe(1.5)
-		engine.applyTempo(1)
+		engine.apply({ tempo: 1 })
 		expect(el.playbackRate).toBe(1) // ours, so we clean it up
 
 		el.playbackRate = 1.75 // now the page's
-		engine.applySemitones(3)
-		engine.applySemitones(0)
+		engine.apply({ semitones: 3 })
+		engine.apply({ semitones: 0 })
 		expect(el.playbackRate).toBe(1.75) // not ours, so left alone
 	})
 
@@ -270,7 +330,7 @@ describe('AudioEngine — element rate ownership', () => {
 		const engine = await freshEngine()
 		const el = makeVideo()
 		await engine.ensureGraph(el, PROCESSOR_URL)
-		engine.applyTempo(0.5)
+		engine.apply({ tempo: 0.5 })
 
 		await engine.dispose()
 
@@ -293,7 +353,7 @@ describe('AudioEngine — graph lifecycle', () => {
 	})
 
 	// YouTube swaps the <video> for ads and the miniplayer. Browsers cap live
-	// contexts at ~6; past that `new AudioContext()` throws and audio dies.
+	// contexts; past the cap `new AudioContext()` throws and audio dies.
 	it('closes the previous context when the element is swapped', async () => {
 		const engine = await freshEngine()
 
@@ -322,6 +382,43 @@ describe('AudioEngine — graph lifecycle', () => {
 		expect(FakeAudioContext.created).toHaveLength(1)
 		expect(FakeAudioContext.live).toBe(0)
 		expect(engine.hasGraph).toBe(false)
+	})
+
+	// Past createMediaElementSource the element outputs only through this context.
+	// Disposing on a later failure would close it: the element's output is then
+	// ignored and it can never be captured again — muted until a reload.
+	it('keeps a captured graph audible when routing fails during the build', async () => {
+		const engine = await freshEngine()
+		const el = makeVideo()
+		engine.apply({ tempo: 1.5 }) // Pre-set so the build's first route() writes the rate.
+		Object.defineProperty(el, 'playbackRate', {
+			set() {
+				throw new TypeError('rejected')
+			},
+			get: () => 1,
+			configurable: true,
+		})
+
+		await expect(engine.ensureGraph(el, PROCESSOR_URL)).rejects.toThrow(TypeError)
+
+		expect(engine.hasGraph).toBe(true)
+		expect(FakeAudioContext.live).toBe(1)
+		expect(currentSource().reaches(currentCtx().destination)).toBe(true)
+	})
+
+	// YouTube can swap an element out and later back in. Its old context is closed
+	// and the element cannot be captured again; say so, without opening a context.
+	it('refuses to re-capture an element whose graph was disposed', async () => {
+		const engine = await freshEngine()
+		const first = makeVideo()
+		await engine.ensureGraph(first, PROCESSOR_URL)
+		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+		const contexts = FakeAudioContext.created.length
+
+		await expect(engine.ensureGraph(first, PROCESSOR_URL)).rejects.toThrow(
+			/cannot be captured again/,
+		)
+		expect(FakeAudioContext.created).toHaveLength(contexts)
 	})
 
 	it('does not leak across repeated failed builds', async () => {
@@ -356,7 +453,7 @@ describe('AudioEngine — graph lifecycle', () => {
 		release()
 		await Promise.all([a, b])
 
-		engine.applyTempo(1.5)
+		engine.apply({ tempo: 1.5 })
 		expect(second.playbackRate).toBe(1.5)
 		expect(first.playbackRate).toBe(1)
 	})
@@ -382,6 +479,18 @@ describe('AudioEngine — graph lifecycle', () => {
 		expect(engine.running).toBe(false)
 		await engine.resume()
 		expect(engine.running).toBe(true)
+	})
+
+	// Per spec, resume() on a context the autoplay policy won't start stays pending.
+	// Awaited unbounded, it would hang the caller and every apply queued behind it.
+	it('bounds resume() when the context never starts', async () => {
+		const engine = await freshEngine()
+		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+		vi.spyOn(currentCtx(), 'resume').mockReturnValue(new Promise(() => {}))
+
+		await engine.resume(10)
+
+		expect(engine.running).toBe(false)
 	})
 
 	it('dispose closes the context and clears the graph', async () => {

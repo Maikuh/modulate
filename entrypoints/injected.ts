@@ -1,6 +1,6 @@
 import { audioEngine } from '@/lib/audioEngine'
 import { parseApplyMessage, type ApplyMessage } from '@/lib/messaging'
-import { isNoOp } from '@/lib/settings'
+import { NO_OP, isNoOp } from '@/lib/settings'
 
 /**
  * Runs in the page's MAIN world (injected by the content script). Owns the Web
@@ -83,7 +83,7 @@ export default defineUnlistedScript(() => {
 			// it back to the page (pitch preservation on, worklet compensating nothing),
 			// so YouTube's speed menu owns it and we must not fight it.
 			if (msg.tempo === 1) return
-			// Otherwise ignore the ratechange our own `applyTempo` just triggered — this
+			// Otherwise ignore the ratechange our own tempo apply just triggered — this
 			// is also what stops apply → playbackRate → ratechange → apply looping.
 			if (el.playbackRate === msg.tempo) return
 		}
@@ -128,8 +128,7 @@ export default defineUnlistedScript(() => {
 			// `findVideo` off a watch page can legitimately match a hover-preview — which
 			// would send `ensureGraph` down its element-swap path, disposing the working
 			// context and irreversibly capturing the wrong <video>.
-			audioEngine.applyTempo(1)
-			audioEngine.applySemitones(0)
+			audioEngine.apply(NO_OP)
 			return
 		}
 
@@ -170,8 +169,7 @@ export default defineUnlistedScript(() => {
 			quickSeek: msg.quickSeek,
 		})
 		await audioEngine.ensureGraph(el, msg.processorUrl)
-		audioEngine.applyTempo(msg.tempo)
-		audioEngine.applySemitones(msg.semitones)
+		audioEngine.apply({ semitones: msg.semitones, tempo: msg.tempo })
 		// Best-effort: the gate above means we normally arrive with activation, but
 		// the older-Firefox fallthrough can reach here without it, in which case the
 		// context stays suspended and the captured element plays silently.

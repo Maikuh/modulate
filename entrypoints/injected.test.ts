@@ -11,8 +11,7 @@ vi.mock('@/lib/audioEngine', () => ({
 		running: true,
 		ensureGraph: vi.fn().mockResolvedValue(undefined),
 		applyQuality: vi.fn(),
-		applyTempo: vi.fn(),
-		applySemitones: vi.fn(),
+		apply: vi.fn(),
 		resume: vi.fn().mockResolvedValue(undefined),
 		dispose: vi.fn().mockResolvedValue(undefined),
 	},
@@ -149,13 +148,13 @@ describe('injected script — lazy capture', () => {
 	it('never builds a graph for a no-op', async () => {
 		await post(message({ semitones: 0, tempo: 1 }))
 		expect(engine.ensureGraph).not.toHaveBeenCalled()
-		expect(engine.applySemitones).not.toHaveBeenCalled()
+		expect(engine.apply).not.toHaveBeenCalled()
 	})
 
 	it('builds for a real pitch or tempo change', async () => {
 		await post(message({ semitones: 2 }))
 		expect(engine.ensureGraph).toHaveBeenCalledWith(expect.anything(), PROCESSOR_URL)
-		expect(engine.applySemitones).toHaveBeenCalledWith(2)
+		expect(engine.apply).toHaveBeenCalledWith(expect.objectContaining({ semitones: 2 }))
 	})
 
 	// Leaving a watch page for the feed resolves to a no-op. Re-resolving the
@@ -166,8 +165,8 @@ describe('injected script — lazy capture', () => {
 		await post(message({ semitones: 0, tempo: 1 }))
 
 		expect(engine.ensureGraph).not.toHaveBeenCalled()
-		expect(engine.applyTempo).toHaveBeenCalledWith(1)
-		expect(engine.applySemitones).toHaveBeenCalledWith(0)
+		expect(engine.apply).toHaveBeenCalledWith(expect.objectContaining({ tempo: 1 }))
+		expect(engine.apply).toHaveBeenCalledWith(expect.objectContaining({ semitones: 0 }))
 	})
 })
 
@@ -210,8 +209,8 @@ describe('injected script — media lifecycle replay', () => {
 		video.dispatchEvent(new Event(type))
 		await tick()
 
-		expect(engine.applySemitones).toHaveBeenCalledWith(5)
-		expect(engine.applyTempo).toHaveBeenCalledWith(1.5)
+		expect(engine.apply).toHaveBeenCalledWith(expect.objectContaining({ semitones: 5 }))
+		expect(engine.apply).toHaveBeenCalledWith(expect.objectContaining({ tempo: 1.5 }))
 	})
 
 	it('does nothing on a media event before any settings have arrived', async () => {
@@ -224,7 +223,7 @@ describe('injected script — media lifecycle replay', () => {
 		fresh.dispatchEvent(new Event('loadstart'))
 		await tick()
 
-		expect(engine.applySemitones).not.toHaveBeenCalled()
+		expect(engine.apply).not.toHaveBeenCalled()
 	})
 
 	describe('ratechange', () => {
@@ -233,7 +232,7 @@ describe('injected script — media lifecycle replay', () => {
 			video.dispatchEvent(new Event('ratechange'))
 			await tick()
 
-			expect(engine.applyTempo).toHaveBeenCalledWith(1.5)
+			expect(engine.apply).toHaveBeenCalledWith(expect.objectContaining({ tempo: 1.5 }))
 		})
 
 		// This guard is what stops apply → playbackRate → ratechange → apply from
@@ -243,7 +242,7 @@ describe('injected script — media lifecycle replay', () => {
 			video.dispatchEvent(new Event('ratechange'))
 			await tick()
 
-			expect(engine.applyTempo).not.toHaveBeenCalled()
+			expect(engine.apply).not.toHaveBeenCalled()
 		})
 
 		// At tempo 1 the engine hands playbackRate back to the page, so YouTube's own
@@ -256,7 +255,7 @@ describe('injected script — media lifecycle replay', () => {
 			video.dispatchEvent(new Event('ratechange'))
 			await tick()
 
-			expect(engine.applyTempo).not.toHaveBeenCalled()
+			expect(engine.apply).not.toHaveBeenCalled()
 		})
 	})
 
@@ -270,12 +269,12 @@ describe('injected script — media lifecycle replay', () => {
 
 		replacement.dispatchEvent(new Event('loadstart'))
 		await tick()
-		expect(engine.applySemitones).toHaveBeenCalledWith(7)
+		expect(engine.apply).toHaveBeenCalledWith(expect.objectContaining({ semitones: 7 }))
 
 		vi.clearAllMocks()
 		video.dispatchEvent(new Event('loadstart'))
 		await tick()
-		expect(engine.applySemitones).not.toHaveBeenCalled()
+		expect(engine.apply).not.toHaveBeenCalled()
 	})
 
 	// One replay per event, however many applies preceded it. Note the DOM itself
@@ -289,7 +288,7 @@ describe('injected script — media lifecycle replay', () => {
 		video.dispatchEvent(new Event('loadstart'))
 		await tick()
 
-		expect(engine.applySemitones).toHaveBeenCalledOnce()
+		expect(engine.apply).toHaveBeenCalledOnce()
 	})
 })
 
@@ -326,7 +325,7 @@ describe('injected script — user activation gate', () => {
 		await tick()
 
 		expect(engine.ensureGraph).toHaveBeenCalledOnce()
-		expect(engine.applySemitones).toHaveBeenCalledWith(4)
+		expect(engine.apply).toHaveBeenCalledWith(expect.objectContaining({ semitones: 4 }))
 	})
 
 	it('keeps queueing while the page still has no activation', async () => {
