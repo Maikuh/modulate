@@ -1,6 +1,6 @@
 import { storage } from 'wxt/utils/storage'
 
-import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality'
+import { DEFAULT_AUDIO_QUALITY, normalizeQuality, type AudioQuality } from '@/lib/audioQuality'
 import {
 	DEFAULT_VIDEO_SETTING,
 	clampSemitones,
@@ -41,10 +41,22 @@ const videoSettings = storage.defineItem<Record<string, VideoSetting>>('local:vi
 	fallback: {},
 })
 
-/** WSOLA quality knobs, shared across all videos. */
-export const audioQuality = storage.defineItem<AudioQuality>('local:audioQuality', {
+/** WSOLA quality knobs, shared across all videos. Reached only via the accessors below. */
+const audioQuality = storage.defineItem<AudioQuality>('local:audioQuality', {
 	fallback: DEFAULT_AUDIO_QUALITY,
 })
+
+/** The shared quality knobs, normalized on read (see `normalizeQuality`). */
+export async function getAudioQuality(): Promise<AudioQuality> {
+	return normalizeQuality(await audioQuality.getValue())
+}
+
+/** Merge `partial` into the stored knobs, normalized on write. */
+export async function setAudioQuality(partial: Partial<AudioQuality>): Promise<AudioQuality> {
+	const next = normalizeQuality({ ...(await getAudioQuality()), ...partial })
+	await audioQuality.setValue(next)
+	return next
+}
 
 /**
  * The stored entry for `videoId`, merged over the defaults and normalized, or

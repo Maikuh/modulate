@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 import { ContentScriptContext } from 'wxt/utils/content-script-context'
 
+import { DEFAULT_AUDIO_QUALITY } from '@/lib/audioQuality'
 import type { ApplyMessage, PlayerState, PopupMessage } from '@/lib/messaging'
 import { globalEnabled, setVideoSetting, getRawVideoSetting } from '@/lib/storage'
 
@@ -151,6 +152,21 @@ describe('content script', () => {
 			tempo: 1.5,
 			overlapMs: expect.any(Number),
 			quickSeek: expect.any(Boolean),
+		})
+		cs.stop()
+	})
+
+	// A stored quality missing a field would otherwise drop that key from the JSON,
+	// and the page-side parser rejects the whole message — every apply, forever.
+	it('sends a complete quality payload even when storage holds a partial one', async () => {
+		await fakeBrowser.storage.local.set({ audioQuality: { quickSeek: false } })
+		await setVideoSetting('vid1', { semitones: 1 })
+		const cs = await startContentScript()
+
+		expect(cs.applies().at(-1)).toMatchObject({
+			semitones: 1,
+			overlapMs: DEFAULT_AUDIO_QUALITY.overlapMs,
+			quickSeek: false,
 		})
 		cs.stop()
 	})

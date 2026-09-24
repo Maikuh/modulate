@@ -2,7 +2,7 @@ import { storage } from 'wxt/utils/storage'
 
 import type { ApplyMessage, BadgeMessage, PopupMessage, PlayerState } from '@/lib/messaging'
 import { DEFAULT_VIDEO_SETTING, resolveSetting } from '@/lib/settings'
-import { globalEnabled, audioQuality, getRawVideoSetting, setVideoSetting } from '@/lib/storage'
+import { globalEnabled, getAudioQuality, getRawVideoSetting, setVideoSetting } from '@/lib/storage'
 import { getVideoId, getVideoTitle } from '@/lib/youtube'
 
 export default defineContentScript({
@@ -68,7 +68,7 @@ export default defineContentScript({
 			// Independent reads — fetch them concurrently rather than serially.
 			const [global, quality, video] = await Promise.all([
 				globalEnabled.getValue(),
-				audioQuality.getValue(),
+				getAudioQuality(),
 				videoId ? getRawVideoSetting(videoId) : Promise.resolve(undefined),
 			])
 			const resolved = resolveSetting(global, video)

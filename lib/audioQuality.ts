@@ -17,10 +17,10 @@ export interface AudioQuality {
 	quickSeek: boolean
 }
 
-export const DEFAULT_AUDIO_QUALITY: AudioQuality = {
+export const DEFAULT_AUDIO_QUALITY: Readonly<AudioQuality> = Object.freeze({
 	overlapMs: 12,
 	quickSeek: true,
-}
+})
 
 /**
  * Range for the overlap slider. The floor is 1, not 0: SoundTouch guards
@@ -33,4 +33,22 @@ export const MAX_OVERLAP_MS = 40
 export function clampOverlapMs(n: number): number {
 	if (!Number.isFinite(n)) return DEFAULT_AUDIO_QUALITY.overlapMs
 	return Math.max(MIN_OVERLAP_MS, Math.min(MAX_OVERLAP_MS, Math.round(n)))
+}
+
+/**
+ * Force a stored quality value onto the valid ranges, the way `normalize` does for
+ * video settings — and for the same reason: the storage item's type is an
+ * unchecked assertion, so an older version's write (the overlap slider once went
+ * down to 0) or a devtools edit arrives typed as `AudioQuality` without being one.
+ * A missing field is worse than an out-of-range one here: `JSON.stringify` drops
+ * it from the `ApplyMessage`, and the page-side parser then rejects every apply.
+ */
+export function normalizeQuality(raw: unknown): AudioQuality {
+	const q = (typeof raw === 'object' && raw !== null ? raw : {}) as Partial<
+		Record<keyof AudioQuality, unknown>
+	>
+	return {
+		overlapMs: clampOverlapMs(typeof q.overlapMs === 'number' ? q.overlapMs : Number.NaN),
+		quickSeek: q.quickSeek !== false,
+	}
 }

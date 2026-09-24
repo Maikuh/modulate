@@ -45,7 +45,7 @@ class AudioEngine {
 	private buildingFor: HTMLMediaElement | null = null
 	private semitones = 0
 	private tempo = 1
-	private quality: AudioQuality = DEFAULT_AUDIO_QUALITY
+	private quality: AudioQuality = { ...DEFAULT_AUDIO_QUALITY }
 	/**
 	 * Whether we are the ones currently driving `element.playbackRate`. YouTube's
 	 * own speed menu writes the same property, so "off" may only reset the rate to

@@ -6,7 +6,6 @@ import {
 	DEFAULT_AUDIO_QUALITY,
 	MIN_OVERLAP_MS,
 	MAX_OVERLAP_MS,
-	clampOverlapMs,
 	type AudioQuality,
 } from '@/lib/audioQuality'
 import { formatSemitones } from '@/lib/format'
@@ -14,7 +13,8 @@ import { Logo, PowerIcon, SlidersIcon, FilmIcon, TrashIcon } from '@/lib/icons'
 import type { VideoSetting } from '@/lib/settings'
 import {
 	globalEnabled,
-	audioQuality,
+	getAudioQuality,
+	setAudioQuality,
 	listVideoSettings,
 	removeVideoSetting,
 	clearVideoSettings,
@@ -22,14 +22,14 @@ import {
 
 function App() {
 	const global = useSignal(true)
-	const quality = useSignal<AudioQuality>(DEFAULT_AUDIO_QUALITY)
+	const quality = useSignal<AudioQuality>({ ...DEFAULT_AUDIO_QUALITY })
 	const videos = useSignal<Record<string, VideoSetting>>({})
 	const error = useSignal<string | null>(null)
 
 	async function refresh() {
 		const [g, q, v] = await Promise.all([
 			globalEnabled.getValue(),
-			audioQuality.getValue(),
+			getAudioQuality(),
 			listVideoSettings(),
 		])
 		global.value = g
@@ -55,13 +55,15 @@ function App() {
 	 * initial defaults on screen — those defaults read as "master switch on, no
 	 * saved videos", which is indistinguishable from a wiped configuration.
 	 */
-	async function reload(reason: string): Promise<void> {
+	async function reload(reason: string): Promise<boolean> {
 		try {
 			await refresh()
 			error.value = null
+			return true
 		} catch (err) {
 			console.error(`[modulate] options reload failed (${reason})`, err)
 			error.value = 'Could not read your settings. Reload this page to try again.'
+			return false
 		}
 	}
 
@@ -77,8 +79,10 @@ function App() {
 			error.value = null
 		} catch (err) {
 			console.error('[modulate] options write failed', err)
-			error.value = 'Could not save that change.'
-			await reload('rollback')
+			// Report after the rollback read: a successful reload clears the error, which
+			// would otherwise wipe this message the instant it appeared. A failed reload
+			// keeps its own, more urgent, "could not read" message instead.
+			if (await reload('rollback')) error.value = 'Could not save that change.'
 		}
 	}
 
@@ -91,9 +95,9 @@ function App() {
 
 	function patchQuality(partial: Partial<AudioQuality>) {
 		void persist(async () => {
-			const next = { ...quality.value, ...partial }
-			quality.value = next
-			await audioQuality.setValue(next)
+			// Optimistic, then replaced by what storage actually accepted (normalized).
+			quality.value = { ...quality.value, ...partial }
+			quality.value = await setAudioQuality(partial)
 		})
 	}
 
@@ -179,9 +183,7 @@ function App() {
 								max={MAX_OVERLAP_MS}
 								step={1}
 								value={quality.value.overlapMs}
-								onChange={(e) =>
-									patchQuality({ overlapMs: clampOverlapMs(Number(e.currentTarget.value)) })
-								}
+								onChange={(e) => patchQuality({ overlapMs: Number(e.currentTarget.value) })}
 							/>
 							<span className="quality-value">{quality.value.overlapMs}</span>
 						</div>
@@ -210,7 +212,7 @@ function App() {
 							<span className="row__label">Restore defaults</span>
 							<span className="row__desc">Reset every quality knob to its recommended value.</span>
 						</div>
-						<button className="btn" onClick={() => patchQuality(DEFAULT_AUDIO_QUALITY)}>
+						<button className="btn" onClick={() => patchQuality({ ...DEFAULT_AUDIO_QUALITY })}>
 							Restore
 						</button>
 					</div>

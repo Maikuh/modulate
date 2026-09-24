@@ -1,10 +1,16 @@
-import { render, within, waitFor } from '@testing-library/preact'
+import { render, within, waitFor, fireEvent } from '@testing-library/preact'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 
 import { DEFAULT_AUDIO_QUALITY } from '@/lib/audioQuality'
-import { globalEnabled, audioQuality, setVideoSetting, listVideoSettings } from '@/lib/storage'
+import {
+	globalEnabled,
+	getAudioQuality,
+	setAudioQuality,
+	setVideoSetting,
+	listVideoSettings,
+} from '@/lib/storage'
 
 import App from './App'
 
@@ -44,7 +50,36 @@ describe('options App', () => {
 		const { quickSeekSwitch } = renderApp()
 		await waitFor(() => expect(quickSeekSwitch()).toBeChecked())
 		await userEvent.click(quickSeekSwitch())
-		await waitFor(async () => expect((await audioQuality.getValue()).quickSeek).toBe(false))
+		await waitFor(async () => expect((await getAudioQuality()).quickSeek).toBe(false))
+	})
+
+	it('persists an overlap slider edit', async () => {
+		const { view } = renderApp()
+		const slider = view.getByLabelText('Overlap (ms)')
+		await waitFor(() => expect(slider).toHaveValue(String(DEFAULT_AUDIO_QUALITY.overlapMs)))
+		fireEvent.change(slider, { target: { value: '30' } })
+		await waitFor(async () => expect((await getAudioQuality()).overlapMs).toBe(30))
+	})
+
+	// The readout must show what the DSP actually runs, not a legacy 0 it ignores.
+	it('shows a legacy out-of-range overlap as the normalized value', async () => {
+		await fakeBrowser.storage.local.set({ audioQuality: { overlapMs: 0, quickSeek: true } })
+		const { view } = renderApp()
+		await waitFor(() => expect(view.getByLabelText('Overlap (ms)')).toHaveValue('1'))
+		expect(view.getByText('1', { selector: '.quality-value' })).toBeInTheDocument()
+	})
+
+	it('rolls a failed write back to the stored value and says so', async () => {
+		const { view, quickSeekSwitch } = renderApp()
+		await waitFor(() => expect(quickSeekSwitch()).toBeChecked())
+		vi.spyOn(fakeBrowser.storage.local, 'set').mockRejectedValueOnce(new Error('quota'))
+		vi.spyOn(console, 'error').mockImplementation(() => {})
+
+		await userEvent.click(quickSeekSwitch())
+
+		expect(await view.findByRole('alert')).toHaveTextContent(/could not save/i)
+		await waitFor(() => expect(quickSeekSwitch()).toBeChecked())
+		expect((await getAudioQuality()).quickSeek).toBe(true)
 	})
 
 	it('shows the empty state when no videos are saved', async () => {
@@ -93,10 +128,10 @@ describe('options App', () => {
 	})
 
 	it('restores quality defaults', async () => {
-		await audioQuality.setValue({ ...DEFAULT_AUDIO_QUALITY, quickSeek: false })
+		await setAudioQuality({ quickSeek: false })
 		const { view, quickSeekSwitch } = renderApp()
 		await waitFor(() => expect(quickSeekSwitch()).not.toBeChecked())
 		await userEvent.click(view.getByRole('button', { name: /restore/i }))
-		await waitFor(async () => expect(await audioQuality.getValue()).toEqual(DEFAULT_AUDIO_QUALITY))
+		await waitFor(async () => expect(await getAudioQuality()).toEqual(DEFAULT_AUDIO_QUALITY))
 	})
 })
