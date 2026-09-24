@@ -4,7 +4,8 @@ import { ContentScriptContext } from 'wxt/utils/content-script-context'
 
 import { DEFAULT_AUDIO_QUALITY } from '@/lib/audioQuality'
 import type { ApplyMessage, PlayerState, PopupMessage } from '@/lib/messaging'
-import { globalEnabled, setVideoSetting, getRawVideoSetting } from '@/lib/storage'
+import { TEMPO_STEP } from '@/lib/settings'
+import { globalEnabled, setAudioQuality, setVideoSetting, getRawVideoSetting } from '@/lib/storage'
 
 import content from './content'
 
@@ -226,6 +227,56 @@ describe('content script', () => {
 			cs.stop()
 		})
 
+		it('does not lose concurrent tempo nudges', async () => {
+			const cs = await startContentScript()
+
+			await Promise.all(
+				Array.from({ length: 4 }, () => send({ type: 'NUDGE_TEMPO', delta: TEMPO_STEP })),
+			)
+
+			expect(await getRawVideoSetting('vid1')).toMatchObject({ tempo: 1.2 })
+			cs.stop()
+		})
+
+		// setVideoSetting rewrites the whole record, so two writes in flight together
+		// (a popup slider racing a shortcut) used to lose one of the two changes.
+		it('keeps both of two writes that arrive together', async () => {
+			const cs = await startContentScript()
+
+			await Promise.all([
+				send({ type: 'SET_SEMITONES', semitones: 3 }),
+				send({ type: 'SET_TEMPO', tempo: 1.5 }),
+			])
+
+			expect(await getRawVideoSetting('vid1')).toMatchObject({ semitones: 3, tempo: 1.5 })
+			cs.stop()
+		})
+
+		// "Off for this video" must survive as a real entry, and apply the no-op.
+		it('SET_VIDEO_ENABLED off applies the no-op but keeps the entry', async () => {
+			await setVideoSetting('vid1', { semitones: 5 })
+			const cs = await startContentScript()
+			cs.reset()
+
+			const state = await send({ type: 'SET_VIDEO_ENABLED', enabled: false })
+
+			expect(state).toMatchObject({ enabled: false, semitones: 5 })
+			expect(cs.applies().at(-1)).toMatchObject({ semitones: 0, tempo: 1 })
+			expect(await getRawVideoSetting('vid1')).toMatchObject({ enabled: false, semitones: 5 })
+			cs.stop()
+		})
+
+		it('SET_TEMPO persists and applies', async () => {
+			const cs = await startContentScript()
+			cs.reset()
+
+			await send({ type: 'SET_TEMPO', tempo: 1.5 })
+
+			expect(await getRawVideoSetting('vid1')).toMatchObject({ tempo: 1.5 })
+			expect(cs.applies().at(-1)).toMatchObject({ tempo: 1.5 })
+			cs.stop()
+		})
+
 		it('RESET restores the defaults', async () => {
 			await setVideoSetting('vid1', { semitones: 7, tempo: 1.5 })
 			const cs = await startContentScript()
@@ -278,6 +329,104 @@ describe('content script', () => {
 			const cs = await startContentScript()
 			await send({ type: 'SET_SEMITONES', semitones: 5 })
 			expect(await getRawVideoSetting('vid1')).toBeUndefined()
+			cs.stop()
+		})
+	})
+
+	describe('re-apply triggers', () => {
+		// This is how per-video settings follow the viewer between videos.
+		it('re-applies on YouTube SPA navigation', async () => {
+			await setVideoSetting('vid1', { semitones: 3 })
+			await setVideoSetting('vid2', { semitones: -2 })
+			const cs = await startContentScript()
+			cs.reset()
+
+			setUrl('https://www.youtube.com/watch?v=vid2')
+			document.dispatchEvent(new Event('yt-navigate-finish'))
+			await tick()
+
+			expect(cs.applies().at(-1)).toMatchObject({ semitones: -2 })
+			cs.stop()
+		})
+
+		it('catches a URL change the navigation event missed, once', async () => {
+			await setVideoSetting('vid2', { semitones: 4 })
+			vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+			try {
+				const cs = await startContentScript()
+				cs.reset()
+
+				setUrl('https://www.youtube.com/watch?v=vid2')
+				vi.advanceTimersByTime(1000)
+				await tick()
+				expect(cs.applies()).toHaveLength(1)
+				expect(cs.applies()[0]).toMatchObject({ semitones: 4 })
+
+				vi.advanceTimersByTime(3000)
+				await tick()
+				expect(cs.applies()).toHaveLength(1)
+				cs.stop()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		// The options page edits storage directly; this is its only path to playback.
+		it('re-applies when storage changes elsewhere', async () => {
+			await setVideoSetting('vid1', { semitones: 3 })
+			const cs = await startContentScript()
+			cs.reset()
+
+			await globalEnabled.setValue(false)
+			await tick()
+			expect(cs.applies().at(-1)).toMatchObject({ semitones: 0, tempo: 1 })
+
+			await setAudioQuality({ overlapMs: 30 })
+			await tick()
+			expect(cs.applies().at(-1)).toMatchObject({ overlapMs: 30 })
+			cs.stop()
+		})
+
+		// The page-realm engine outlives the content script: disabling or updating the
+		// extension would otherwise leave the video transposed until a reload.
+		it('stands the engine down when the extension context is invalidated', async () => {
+			await setVideoSetting('vid1', { semitones: 3, tempo: 1.5 })
+			const cs = await startContentScript()
+			cs.reset()
+
+			cs.ctx.notifyInvalidated()
+			await tick()
+
+			expect(cs.applies().at(-1)).toMatchObject({ semitones: 0, tempo: 1 })
+			cs.reset()
+			await globalEnabled.setValue(false)
+			await tick()
+			expect(cs.applies()).toHaveLength(0)
+			cs.stop()
+		})
+	})
+
+	describe('toolbar badge', () => {
+		it('reports the effective settings for the tab', async () => {
+			await setVideoSetting('vid1', { semitones: 3 })
+			const cs = await startContentScript()
+
+			expect(browser.runtime.sendMessage).toHaveBeenLastCalledWith({
+				type: 'MODULATE_BADGE',
+				onVideo: true,
+				semitones: 3,
+				tempo: 1,
+			})
+			cs.stop()
+		})
+
+		it('reports no video off a watch page', async () => {
+			setUrl('https://www.youtube.com/feed/subscriptions')
+			const cs = await startContentScript()
+
+			expect(browser.runtime.sendMessage).toHaveBeenLastCalledWith(
+				expect.objectContaining({ type: 'MODULATE_BADGE', onVideo: false }),
+			)
 			cs.stop()
 		})
 	})

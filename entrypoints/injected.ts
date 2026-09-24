@@ -14,7 +14,20 @@ import { NO_OP, isNoOp } from '@/lib/settings'
  * having the extension APIs). The payload is a JSON string: primitives cross the
  * content/page membrane without `cloneInto`.
  */
+/** Page-realm marker for the instance that owns the audio graph. */
+export const INSTANCE_KEY = Symbol.for('modulate.injected')
+
 export default defineUnlistedScript(() => {
+	// Firefox re-runs content scripts in open tabs when the extension updates, and
+	// the new content script injects this file again. The first instance owns the
+	// captured <video> — a second could never capture it, and would open and close a
+	// context on every trigger trying — so later copies stand down and leave the
+	// page to it (the old content script stood its engine down on invalidation, and
+	// the new one's messages reach the same listener).
+	const page = window as Window & { [INSTANCE_KEY]?: true }
+	if (page[INSTANCE_KEY]) return
+	page[INSTANCE_KEY] = true
+
 	/** Find the player's media element (mounts late on first load). */
 	function findVideo(): HTMLVideoElement | null {
 		// Two queries rather than one selector list: `querySelector` returns the first

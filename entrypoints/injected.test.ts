@@ -19,7 +19,7 @@ vi.mock('@/lib/audioEngine', () => ({
 
 import { audioEngine } from '@/lib/audioEngine'
 
-import injected from './injected'
+import injected, { INSTANCE_KEY } from './injected'
 
 const engine = vi.mocked(audioEngine)
 const PROCESSOR_URL = 'chrome-extension://abc123/soundtouch-processor.js'
@@ -102,6 +102,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	Reflect.deleteProperty(window, INSTANCE_KEY)
 	recording?.mockRestore()
 	recording = null
 	teardown.forEach((off) => off())
@@ -228,6 +229,7 @@ describe('injected script — media lifecycle replay', () => {
 	it('does nothing on a media event before any settings have arrived', async () => {
 		teardown.forEach((off) => off())
 		teardown = []
+		Reflect.deleteProperty(window, INSTANCE_KEY)
 		vi.clearAllMocks()
 		const fresh = mountVideo()
 		start()
@@ -539,5 +541,19 @@ describe('injected script — pagehide', () => {
 	it('disposes the graph on a real unload', () => {
 		window.dispatchEvent(pagehide(false))
 		expect(engine.dispose).toHaveBeenCalledOnce()
+	})
+})
+
+describe('injected script — single instance', () => {
+	// A second copy (Firefox re-injects on update) could never capture the element
+	// the first one already owns, and would churn a context on every trigger.
+	it('leaves the page to the instance already running', async () => {
+		mountVideo()
+		start()
+		start()
+
+		await post(message({ semitones: 2 }))
+
+		expect(engine.ensureGraph).toHaveBeenCalledOnce()
 	})
 })
