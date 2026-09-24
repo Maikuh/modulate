@@ -1,4 +1,4 @@
-import type { BadgeMessage, PopupMessage } from '@/lib/messaging'
+import { logSendFailure, type BadgeMessage, type PopupMessage } from '@/lib/messaging'
 import { TEMPO_STEP, isNoOp } from '@/lib/settings'
 
 /** Keyboard `commands` → the `PopupMessage` to send the active tab's content script. */
@@ -13,6 +13,10 @@ export default defineBackground(() => {
 	// MV3 Chrome exposes `browser.action`; MV2 Firefox exposes `browserAction`.
 	const action = browser.action ?? browser.browserAction
 	const ACCENT = '#646cff'
+	// Settings saved but not audible yet (waiting for a click in the page) or not at
+	// all (engine failure): the badge still shows what is set, but muted.
+	const INACTIVE = '#8a8a93'
+	const ERROR = '#d93025'
 
 	// Toolbar icon: colored on a watchable video, grayscale otherwise. The content
 	// script is the authority on whether its tab holds a video — in MV3 the
@@ -27,9 +31,9 @@ export default defineBackground(() => {
 		// Rejects benignly when the tab closed mid-flight, but also when the grayscale
 		// set is missing from the build — and that set is the manifest's `default_icon`,
 		// so a silent failure there means no icon renders anywhere and nothing says why.
-		action.setIcon({ tabId, path })?.catch?.((err: unknown) => {
-			console.debug('[modulate] setIcon failed', err)
-		})
+		action
+			.setIcon({ tabId, path })
+			?.catch?.((err: unknown) => logSendFailure('setIcon failed', err))
 	}
 
 	// A full-document navigation clears the per-tab icon override back to grayscale.
@@ -45,16 +49,16 @@ export default defineBackground(() => {
 	browser.commands?.onCommand.addListener(async (command) => {
 		const msg = COMMAND_MESSAGES[command]
 		if (!msg) return
-		const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
-		if (tab?.id == null) return
 		try {
+			const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+			if (tab?.id == null) return
 			await browser.tabs.sendMessage(tab.id, msg)
 		} catch (err) {
 			// Usually just "not a YouTube tab". But the same rejection covers a YouTube
 			// tab that predates an extension install/reload and so has no content script
 			// yet — there the shortcut appears broken and only a tab reload fixes it, so
 			// don't swallow the distinction entirely.
-			console.debug('[modulate] shortcut not delivered', command, err)
+			logSendFailure(`shortcut ${command} not delivered`, err)
 		}
 	})
 
@@ -69,12 +73,22 @@ export default defineBackground(() => {
 		// Badge stays compact: negative pitch keeps its `-`, positive drops the `+`.
 		// Tempo-only gets a glyph rather than the number — the badge fits roughly four
 		// characters, and "1.25" leaves no room to also signal what it means.
-		const text = isNoOp(message) ? '' : message.semitones !== 0 ? String(message.semitones) : '♪'
+		// A failed engine gets a "!" so the badge stops claiming a transpose that isn't
+		// playing.
+		const text = isNoOp(message)
+			? ''
+			: message.status === 'error'
+				? '!'
+				: message.semitones !== 0
+					? String(message.semitones)
+					: '♪'
+		const color =
+			message.status === 'error' ? ERROR : message.status === 'applied' ? ACCENT : INACTIVE
 		// Both reject with "No tab with id" if the tab closed between the content
 		// script's send and this handler; unhandled, that surfaces as a service-worker
 		// error with no context.
-		const onError = (err: unknown) => console.debug('[modulate] badge update failed', err)
+		const onError = (err: unknown) => logSendFailure('badge update failed', err)
 		action.setBadgeText({ tabId, text })?.catch?.(onError)
-		action.setBadgeBackgroundColor?.({ tabId, color: ACCENT })?.catch?.(onError)
+		action.setBadgeBackgroundColor?.({ tabId, color })?.catch?.(onError)
 	})
 })

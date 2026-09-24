@@ -2,42 +2,89 @@ import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 
 import { Logo, PitchIcon, TempoIcon, ResetIcon, GearIcon } from '@/lib/icons'
-import type { PlayerState, PopupMessage } from '@/lib/messaging'
+import {
+	logSendFailure,
+	type AudioStatus,
+	type PlayerState,
+	type PopupMessage,
+	type PopupResponse,
+} from '@/lib/messaging'
 import { MIN_SEMITONES, MAX_SEMITONES, MIN_TEMPO, MAX_TEMPO, TEMPO_STEP } from '@/lib/settings'
 
 import { ControlRow } from './components/ControlRow'
 import { Toggle } from './components/Toggle'
 
-/** Send a message to the content script in the active tab; null if none responds. */
-async function send(msg: PopupMessage): Promise<PlayerState | null> {
+type SendResult =
+	/** The content script answered with the tab's state. */
+	| { kind: 'state'; state: PlayerState }
+	/** The content script answered, but handling the message failed. */
+	| { kind: 'failed' }
+	/** No content script answered. `url` only when the browser lets us read it. */
+	| { kind: 'unreachable'; url?: string }
+
+const YOUTUBE_URL = /^https?:\/\/([^/]+\.)?youtube\.com\//
+
+/** Send a message to the content script in the active tab. */
+async function send(msg: PopupMessage): Promise<SendResult> {
 	let tab
 	try {
 		;[tab] = await browser.tabs.query({ active: true, currentWindow: true })
 	} catch (err) {
 		console.error('[modulate] could not read the active tab', err)
-		return null
+		return { kind: 'failed' }
 	}
-	if (tab?.id == null) return null
+	if (tab?.id == null) return { kind: 'unreachable' }
+	let res: PopupResponse | undefined
 	try {
-		return (await browser.tabs.sendMessage(tab.id, msg)) as PlayerState
+		res = (await browser.tabs.sendMessage(tab.id, msg)) as PopupResponse | undefined
 	} catch (err) {
 		// Usually "not a YouTube page". But the same rejection covers a YouTube tab
-		// that predates an extension install or reload and so has no content script
-		// yet — there the empty state below tells the user to open a YouTube video
-		// while they are already looking at one, and only a tab reload fixes it.
-		console.debug('[modulate] no content script in the active tab', tab.url, err)
-		return null
+		// that predates an extension install or update and so has no content script
+		// yet — the empty state tells those apart when the tab URL is readable.
+		logSendFailure('no content script in the active tab', err)
+		return { kind: 'unreachable', url: tab.url }
 	}
+	if (!res) return { kind: 'unreachable', url: tab.url }
+	return res.ok ? { kind: 'state', state: res.state } : { kind: 'failed' }
+}
+
+/** Why the controls can't be shown, as the message to show instead. */
+function emptyMessage(result: SendResult | null): string {
+	if (result?.kind === 'failed')
+		return "Couldn't read this tab's settings. Reload the tab to try again."
+	if (result?.kind === 'unreachable') {
+		// A YouTube tab with no content script predates an install or update.
+		if (result.url && YOUTUBE_URL.test(result.url))
+			return 'Reload this tab to start using Modulate on it.'
+		if (!result.url) {
+			return 'Open a YouTube video to shift its pitch and bend its tempo. Already on one? Reload the tab.'
+		}
+	}
+	return 'Open a YouTube video to shift its pitch and bend its tempo.'
+}
+
+/** What the page engine is doing, when that is not simply "playing it". */
+const AUDIO_NOTICE: Partial<Record<AudioStatus, { text: string; error?: boolean }>> = {
+	'waiting-for-gesture': {
+		text: 'Click anywhere on the YouTube page to start. Browsers hold processed audio until the page itself is clicked.',
+	},
+	'no-video': { text: 'No video player found on this page yet.' },
+	error: { text: 'Audio processing failed on this page. Reload the tab to retry.', error: true },
 }
 
 function App() {
 	const state = useSignal<PlayerState | null>(null)
+	const initial = useSignal<SendResult | null>(null)
+	const error = useSignal<string | null>(null)
 	const loading = useSignal(true)
 
 	// Mount-once load; signals are stable refs, so no deps.
 	useEffect(() => {
 		send({ type: 'GET_STATE' })
-			.then((s) => (state.value = s))
+			.then((r) => {
+				initial.value = r
+				if (r.kind === 'state') state.value = r.state
+			})
 			// `send` already handles its own failures, but a throw here would leave the
 			// popup stuck on the loading dots forever with nothing logged.
 			.catch((err) => console.error('[modulate] popup state load failed', err))
@@ -45,8 +92,20 @@ function App() {
 	}, [])
 
 	async function dispatch(msg: PopupMessage) {
-		const s = await send(msg)
-		if (s) state.value = s
+		const r = await send(msg)
+		if (r.kind === 'state') {
+			state.value = r.state
+			error.value = null
+			return
+		}
+		error.value =
+			r.kind === 'failed'
+				? "Couldn't save that change."
+				: 'Lost contact with this tab. Reload it to keep tuning.'
+		// Re-render from the last known state: a toggle or slider the user just moved
+		// holds its new DOM position until Preact re-renders, which would otherwise
+		// show a change that never happened.
+		if (state.value) state.value = { ...state.value }
 	}
 
 	if (loading.value) {
@@ -77,13 +136,14 @@ function App() {
 						<Logo />
 					</span>
 					<h1 className="state__title">Modulate</h1>
-					<p className="state__msg">Open a YouTube video to shift its pitch and bend its tempo.</p>
+					<p className="state__msg">{emptyMessage(initial.value)}</p>
 				</div>
 			</div>
 		)
 	}
 
 	const controlsDisabled = !s.globalEnabled || !s.enabled
+	const notice = s.globalEnabled ? AUDIO_NOTICE[s.audio] : undefined
 
 	return (
 		<div className="popup">
@@ -112,6 +172,14 @@ function App() {
 			<main className="body">
 				{!s.globalEnabled && (
 					<p className="paused">Modulate is off. Flip the switch to start tuning audio.</p>
+				)}
+				{error.value && (
+					<p className="notice notice--error" role="alert">
+						{error.value}
+					</p>
+				)}
+				{notice && (
+					<output className={`notice${notice.error ? ' notice--error' : ''}`}>{notice.text}</output>
 				)}
 
 				<ControlRow

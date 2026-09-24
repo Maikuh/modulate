@@ -1,7 +1,16 @@
 import { storage } from 'wxt/utils/storage'
 
 import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality'
-import type { ApplyMessage, BadgeMessage, PopupMessage, PlayerState } from '@/lib/messaging'
+import {
+	logSendFailure,
+	parseStatusMessage,
+	type ApplyMessage,
+	type AudioStatus,
+	type BadgeMessage,
+	type PopupMessage,
+	type PopupResponse,
+	type PlayerState,
+} from '@/lib/messaging'
 import { DEFAULT_VIDEO_SETTING, NO_OP, resolveSetting, type ResolvedSetting } from '@/lib/settings'
 import { globalEnabled, getAudioQuality, getRawVideoSetting, setVideoSetting } from '@/lib/storage'
 import { getVideoId, getVideoTitle } from '@/lib/youtube'
@@ -33,32 +42,49 @@ export default defineContentScript({
 			})
 			;(document.head ?? document.documentElement).append(script)
 		})
-		injected.catch((err) => console.error('[modulate]', err))
+		injected.catch((err) => {
+			console.error('[modulate]', err)
+			setAudioStatus('error')
+		})
 
-		/** A safe, untransposed `PlayerState` — the shape every read starts from. */
-		function baseState(): PlayerState {
-			return {
-				videoId: getVideoId(location.href),
-				globalEnabled: true,
-				enabled: DEFAULT_VIDEO_SETTING.enabled,
-				semitones: DEFAULT_VIDEO_SETTING.semitones,
-				tempo: DEFAULT_VIDEO_SETTING.tempo,
-			}
+		// What the page engine last reported, and the badge it annotates. The engine
+		// answers each apply asynchronously, so the badge is re-sent when it does.
+		let audioStatus: AudioStatus = 'idle'
+		let lastBadge: Omit<BadgeMessage, 'status'> | null = null
+
+		function setAudioStatus(status: AudioStatus): void {
+			if (status === audioStatus) return
+			audioStatus = status
+			sendBadge()
 		}
+
+		function sendBadge(): void {
+			if (!lastBadge) return
+			const badge: BadgeMessage = { ...lastBadge, status: audioStatus }
+			// Logged rather than swallowed: a lost badge message means the toolbar keeps
+			// advertising the PREVIOUS video's state, which is worse than blank. Routine
+			// when the extension was reloaded under this tab or the tab is closing.
+			browser.runtime.sendMessage(badge).catch((err) => logSendFailure('badge update dropped', err))
+		}
+
+		ctx.addEventListener(window, 'message', (event: MessageEvent) => {
+			if (event.source !== window || typeof event.data !== 'string') return
+			const status = parseStatusMessage(event.data)
+			if (status) setAudioStatus(status)
+		})
 
 		/** Read the state the popup needs to render the controls. */
 		async function getState(): Promise<PlayerState> {
 			const videoId = getVideoId(location.href)
 			const global = await globalEnabled.getValue()
-			const base: PlayerState = { ...baseState(), globalEnabled: global }
-			if (!videoId) return base
-
-			const setting = (await getRawVideoSetting(videoId)) ?? DEFAULT_VIDEO_SETTING
+			const setting = (videoId && (await getRawVideoSetting(videoId))) || DEFAULT_VIDEO_SETTING
 			return {
-				...base,
+				videoId,
+				globalEnabled: global,
 				enabled: setting.enabled,
 				semitones: setting.semitones,
 				tempo: setting.tempo,
+				audio: audioStatus,
 			}
 		}
 
@@ -104,19 +130,13 @@ export default defineContentScript({
 			postApply(resolved, quality)
 
 			// Tell the background to render the toolbar badge for this tab.
-			const badge: BadgeMessage = {
+			lastBadge = {
 				type: 'MODULATE_BADGE',
 				onVideo: videoId != null,
 				semitones: resolved.semitones,
 				tempo: resolved.tempo,
 			}
-			browser.runtime.sendMessage(badge).catch((err) => {
-				// Expected when the extension was reloaded or updated under this tab (its
-				// context is invalidated) or the tab is closing; logged rather than
-				// swallowed because a lost badge message means the toolbar keeps
-				// advertising the PREVIOUS video's state, which is worse than blank.
-				console.debug('[modulate] badge update dropped', err)
-			})
+			sendBadge()
 		}
 
 		/**
@@ -209,15 +229,18 @@ export default defineContentScript({
 		}
 
 		browser.runtime.onMessage.addListener(
-			(msg: PopupMessage, _sender, sendResponse: (s: PlayerState) => void) => {
-				handle(msg).then(sendResponse, (err) => {
-					// ALWAYS answer. Dropping the response leaves the channel open until the
-					// port closes, at which point the popup's `sendMessage` rejects into its
-					// blanket catch and renders as "no content script here" — so a storage
-					// failure shows up as a button that silently does nothing.
-					console.error('[modulate] message failed', msg?.type, err)
-					sendResponse(baseState())
-				})
+			(msg: PopupMessage, _sender, sendResponse: (r: PopupResponse) => void) => {
+				handle(msg).then(
+					(state) => sendResponse({ ok: true, state }),
+					(err) => {
+						// ALWAYS answer. Dropping the response leaves the channel open until the
+						// port closes, at which point the popup's `sendMessage` rejects and
+						// renders as "no content script here" — so a storage failure would show
+						// up as a button that silently does nothing.
+						console.error('[modulate] message failed', msg?.type, err)
+						sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) })
+					},
+				)
 				return true // keep the channel open for the async response
 			},
 		)

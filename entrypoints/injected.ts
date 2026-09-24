@@ -1,5 +1,10 @@
 import { audioEngine } from '@/lib/audioEngine'
-import { parseApplyMessage, type ApplyMessage } from '@/lib/messaging'
+import {
+	parseApplyMessage,
+	type ApplyMessage,
+	type AudioStatus,
+	type StatusMessage,
+} from '@/lib/messaging'
 import { NO_OP, isNoOp } from '@/lib/settings'
 
 /**
@@ -88,16 +93,26 @@ export default defineUnlistedScript(() => {
 		void drain()
 	}
 
+	/** Tell the content script how the latest apply went (see `AudioStatus`). */
+	function report(status: AudioStatus): void {
+		const msg: StatusMessage = { source: 'modulate-page', type: 'status', status }
+		window.postMessage(JSON.stringify(msg), '*')
+	}
+
 	async function drain(): Promise<void> {
 		while (dirty) {
 			dirty = false
 			const msg = lastMsg
 			if (!msg) continue
+			let status: AudioStatus | null
 			try {
-				await apply(msg)
+				status = await apply(msg)
 			} catch (err) {
 				console.error('[modulate] audio apply failed', err)
+				status = 'error'
 			}
+			// Superseded (`null`) or overtaken mid-flight: only the latest gets reported.
+			if (status && !dirty) report(status)
 		}
 		// Cleared in the same turn the loop exits, so a `schedule()` can never find
 		// `draining` set by a worker that has already stopped reading `dirty`.
@@ -160,21 +175,22 @@ export default defineUnlistedScript(() => {
 	 * Converge the engine onto `msg`. Only ever called by `drain`, one at a time.
 	 * After each await it bails if `lastMsg` moved meanwhile (`dirty`): the worker
 	 * loops straight on to the newer message, so a stale one is never applied.
+	 * Resolves to the outcome, or null when superseded.
 	 */
-	async function apply(msg: ApplyMessage): Promise<void> {
+	async function apply(msg: ApplyMessage): Promise<AudioStatus | null> {
 		if (isNoOp(msg)) {
 			// Lazy capture: leave the <video> untouched until a real change (transpose or
 			// tempo) is asked for. `createMediaElementSource` is irreversible and reroutes
 			// ALL audio through Web Audio — capturing for a no-op needlessly exposes
 			// normal playback to any graph/worklet fault.
-			if (!audioEngine.hasGraph) return
+			if (!audioEngine.hasGraph) return 'idle'
 			// A graph already exists: bypass it in place and return WITHOUT re-resolving
 			// the element. Leaving a watch page for the feed resolves to a no-op, and
 			// `findVideo` off a watch page can legitimately match a hover-preview — which
 			// would send `ensureGraph` down its element-swap path, disposing the working
 			// context and irreversibly capturing the wrong <video>.
 			audioEngine.apply(NO_OP)
-			return
+			return 'applied'
 		}
 
 		// Defer the FIRST graph build until the page has user activation. Building
@@ -194,16 +210,16 @@ export default defineUnlistedScript(() => {
 		const ua = navigator.userActivation
 		if (!audioEngine.hasGraph && ua && !ua.hasBeenActive) {
 			hookGesture()
-			return
+			return 'waiting-for-gesture'
 		}
 
 		const el = await waitForVideo()
-		if (dirty) return
+		if (dirty) return null
 		if (!el) {
 			// Ten seconds with no <video>. The media-event replay can't fire (no element
 			// was ever bound); only the next message from the content script retries.
 			console.warn('[modulate] no <video> found; settings not applied')
-			return
+			return 'no-video'
 		}
 		// Bind (or rebind on swap) the lifecycle listeners so a later media reload or
 		// YouTube-driven rate reset triggers a replay without waiting for the next nav.
@@ -214,7 +230,7 @@ export default defineUnlistedScript(() => {
 			quickSeek: msg.quickSeek,
 		})
 		await audioEngine.ensureGraph(el, msg.processorUrl)
-		if (dirty) return
+		if (dirty) return null
 		audioEngine.apply({ semitones: msg.semitones, tempo: msg.tempo })
 		// Best-effort: the gate above means we normally arrive with activation, but
 		// the older-Firefox fallthrough can reach here without it, in which case the
@@ -223,7 +239,9 @@ export default defineUnlistedScript(() => {
 		if (!audioEngine.running) {
 			console.warn('[modulate] audio context did not resume; click the page to start audio')
 			hookGesture()
+			return 'waiting-for-gesture'
 		}
+		return 'applied'
 	}
 
 	window.addEventListener('message', (event) => {

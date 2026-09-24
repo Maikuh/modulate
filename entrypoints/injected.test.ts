@@ -557,3 +557,65 @@ describe('injected script — single instance', () => {
 		expect(engine.ensureGraph).toHaveBeenCalledOnce()
 	})
 })
+
+describe('injected script — status reports', () => {
+	/** Statuses posted back for the content script, in order. */
+	function collectStatuses(): string[] {
+		const seen: string[] = []
+		const onMessage = (e: MessageEvent) => {
+			if (typeof e.data !== 'string' || !e.data.includes('modulate-page')) return
+			seen.push((JSON.parse(e.data) as { status: string }).status)
+		}
+		window.addEventListener('message', onMessage)
+		teardown.push(() => window.removeEventListener('message', onMessage))
+		return seen
+	}
+
+	afterEach(() => Reflect.deleteProperty(navigator, 'userActivation'))
+
+	it('reports applied once the settings are live', async () => {
+		mountVideo()
+		start()
+		const seen = collectStatuses()
+
+		await post(message({ semitones: 2 }))
+
+		expect(seen).toEqual(['applied'])
+	})
+
+	it('reports idle for a no-op that captured nothing', async () => {
+		mountVideo()
+		start()
+		const seen = collectStatuses()
+
+		await post(message())
+
+		expect(seen).toEqual(['idle'])
+	})
+
+	it('reports that it is waiting for a click in the page', async () => {
+		Object.defineProperty(navigator, 'userActivation', {
+			value: { hasBeenActive: false, isActive: false },
+			configurable: true,
+		})
+		mountVideo()
+		start()
+		const seen = collectStatuses()
+
+		await post(message({ semitones: 2 }))
+
+		expect(seen).toEqual(['waiting-for-gesture'])
+	})
+
+	it('reports an engine failure', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {})
+		engine.ensureGraph.mockRejectedValueOnce(new Error('404'))
+		mountVideo()
+		start()
+		const seen = collectStatuses()
+
+		await post(message({ semitones: 2 }))
+
+		expect(seen).toEqual(['error'])
+	})
+})

@@ -27,6 +27,27 @@ export type PopupMessage =
 	| { type: 'SET_GLOBAL_ENABLED'; enabled: boolean }
 	| { type: 'RESET' }
 
+/**
+ * What the page-realm engine made of the latest settings, reported back so the
+ * popup and badge stop claiming success the page never achieved.
+ *
+ * - `idle`: nothing asked for, and no graph was built (lazy capture).
+ * - `applied`: the settings are live (or bypassed at the no-op).
+ * - `waiting-for-gesture`: queued until the page itself is clicked or typed in;
+ *   the audio context can't start without that, and popup clicks don't count.
+ * - `no-video`: no player element appeared on the page.
+ * - `error`: the engine failed (worklet load, capture, routing).
+ */
+export type AudioStatus = 'idle' | 'applied' | 'waiting-for-gesture' | 'no-video' | 'error'
+
+const AUDIO_STATUSES: readonly AudioStatus[] = [
+	'idle',
+	'applied',
+	'waiting-for-gesture',
+	'no-video',
+	'error',
+]
+
 /** Sent from the content script to the background script to drive the toolbar badge. */
 export interface BadgeMessage {
 	type: 'MODULATE_BADGE'
@@ -36,6 +57,8 @@ export interface BadgeMessage {
 	semitones: number
 	/** Effective tempo currently applied in the sending tab. */
 	tempo: number
+	/** What the page engine last reported for those settings. */
+	status: AudioStatus
 }
 
 /**
@@ -102,6 +125,34 @@ export function parseApplyMessage(raw: string): ApplyMessage | null {
 	}
 }
 
+/**
+ * Posted from the main-world `injected` script back to the content script after
+ * each apply settles, as a JSON string like `ApplyMessage`.
+ */
+export interface StatusMessage {
+	source: 'modulate-page'
+	type: 'status'
+	status: AudioStatus
+}
+
+/**
+ * Parse a `StatusMessage`, or null if it isn't one. Anything in the MAIN world
+ * can post one, but a forged status only changes what the popup and badge say —
+ * it never reaches storage or the audio graph.
+ */
+export function parseStatusMessage(raw: string): AudioStatus | null {
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(raw)
+	} catch {
+		return null
+	}
+	if (typeof parsed !== 'object' || parsed === null) return null
+	const m = parsed as Record<string, unknown>
+	if (m.source !== 'modulate-page' || m.type !== 'status') return null
+	return AUDIO_STATUSES.includes(m.status as AudioStatus) ? (m.status as AudioStatus) : null
+}
+
 /** Narrow to a finite number — rejects NaN, Infinity, strings and undefined. */
 function isFiniteNumber(value: unknown): value is number {
 	return typeof value === 'number' && Number.isFinite(value)
@@ -115,4 +166,34 @@ export interface PlayerState {
 	enabled: boolean
 	semitones: number
 	tempo: number
+	/** What the page engine last reported (see `AudioStatus`). */
+	audio: AudioStatus
+}
+
+/**
+ * The content script's reply to every `PopupMessage`. A failure is its own case
+ * rather than a default-valued `PlayerState`: defaults read as "0 st, 1.00×",
+ * indistinguishable from a reset, and would make a failed read look like one.
+ */
+export type PopupResponse = { ok: true; state: PlayerState } | { ok: false; error: string }
+
+// The routine "nobody is listening" failures: a tab without our content script
+// (not YouTube, or opened before an install/update), a tab that closed mid-flight,
+// or this script outliving its extension.
+const EXPECTED_DISCONNECT =
+	/Receiving end does not exist|Could not establish connection|No tab with id|Invalid tab ID|Extension context invalidated/i
+
+/** Whether a messaging failure just means no content script is listening. */
+export function isNoReceiver(err: unknown): boolean {
+	return EXPECTED_DISCONNECT.test(err instanceof Error ? err.message : String(err))
+}
+
+/**
+ * Log a failed extension call: `debug` for the routine disconnect cases above,
+ * which fire constantly and mean nothing, and `warn` for anything else — which
+ * Chrome would otherwise hide behind its default-off verbose level.
+ */
+export function logSendFailure(what: string, err: unknown): void {
+	if (isNoReceiver(err)) console.debug(`[modulate] ${what}`, err)
+	else console.warn(`[modulate] ${what}`, err)
 }

@@ -3,7 +3,7 @@ import { fakeBrowser } from 'wxt/testing/fake-browser'
 import { ContentScriptContext } from 'wxt/utils/content-script-context'
 
 import { DEFAULT_AUDIO_QUALITY } from '@/lib/audioQuality'
-import type { ApplyMessage, PlayerState, PopupMessage } from '@/lib/messaging'
+import type { ApplyMessage, PlayerState, PopupMessage, PopupResponse } from '@/lib/messaging'
 import { TEMPO_STEP } from '@/lib/settings'
 import { globalEnabled, setAudioQuality, setVideoSetting, getRawVideoSetting } from '@/lib/storage'
 
@@ -87,7 +87,15 @@ async function tick(times = 6) {
  * `sendResponse` callback, exactly as it does for the real popup.
  */
 function send(msg: PopupMessage): Promise<PlayerState> {
-	return new Promise<PlayerState>((resolve, reject) => {
+	return sendRaw(msg).then((res) => {
+		if (!res.ok) throw new Error(`${msg.type} failed: ${res.error}`)
+		return res.state
+	})
+}
+
+/** Like `send`, but resolves to the raw reply, failures included. */
+function sendRaw(msg: PopupMessage): Promise<PopupResponse> {
+	return new Promise<PopupResponse>((resolve, reject) => {
 		const timer = setTimeout(() => reject(new Error(`no response to ${msg.type}`)), 1000)
 		// `trigger` is typed for the two-arg (message, sender) shape, but it spreads
 		// whatever it is given straight into the listeners — which take a third
@@ -95,13 +103,13 @@ function send(msg: PopupMessage): Promise<PlayerState> {
 		const trigger = fakeBrowser.runtime.onMessage.trigger as (
 			...args: unknown[]
 		) => Promise<unknown>
-		void trigger(msg, {}, (state: PlayerState) => {
+		void trigger(msg, {}, (res: PopupResponse) => {
 			clearTimeout(timer)
-			resolve(state)
+			resolve(res)
 		})
-	}).then(async (state) => {
+	}).then(async (res) => {
 		await tick()
-		return state
+		return res
 	})
 }
 
@@ -299,6 +307,18 @@ describe('content script', () => {
 			cs.stop()
 		})
 
+		// Defaults ("0 st, 1.00×") read as a reset; a failure has to look like one.
+		it('answers a failed write with an error, not a default state', async () => {
+			const cs = await startContentScript()
+			vi.spyOn(console, 'error').mockImplementation(() => {})
+			vi.spyOn(fakeBrowser.storage.local, 'set').mockRejectedValue(new Error('quota'))
+
+			const res = await sendRaw({ type: 'SET_SEMITONES', semitones: 5 })
+
+			expect(res).toEqual({ ok: false, error: 'quota' })
+			cs.stop()
+		})
+
 		it('answers an unknown message instead of applying for it', async () => {
 			const cs = await startContentScript()
 			cs.reset()
@@ -416,7 +436,33 @@ describe('content script', () => {
 				onVideo: true,
 				semitones: 3,
 				tempo: 1,
+				status: 'idle',
 			})
+			cs.stop()
+		})
+
+		// The engine answers each apply asynchronously; the badge must follow it, or
+		// it keeps advertising a transpose the page never started.
+		it('re-sends the badge when the page engine reports back', async () => {
+			await setVideoSetting('vid1', { semitones: 3 })
+			const cs = await startContentScript()
+
+			window.dispatchEvent(
+				new MessageEvent('message', {
+					data: JSON.stringify({
+						source: 'modulate-page',
+						type: 'status',
+						status: 'waiting-for-gesture',
+					}),
+					source: window,
+				}),
+			)
+			await tick()
+
+			expect(browser.runtime.sendMessage).toHaveBeenLastCalledWith(
+				expect.objectContaining({ semitones: 3, status: 'waiting-for-gesture' }),
+			)
+			expect((await send({ type: 'GET_STATE' })).audio).toBe('waiting-for-gesture')
 			cs.stop()
 		})
 

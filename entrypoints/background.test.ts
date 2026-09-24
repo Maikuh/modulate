@@ -32,7 +32,14 @@ function installStubs() {
 }
 
 function badge(overrides: Partial<BadgeMessage> = {}): BadgeMessage {
-	return { type: 'MODULATE_BADGE', onVideo: true, semitones: 0, tempo: 1, ...overrides }
+	return {
+		type: 'MODULATE_BADGE',
+		onVideo: true,
+		semitones: 0,
+		tempo: 1,
+		status: 'applied',
+		...overrides,
+	}
 }
 
 /**
@@ -95,6 +102,22 @@ describe('background — badge text', () => {
 		expect(action.setBadgeBackgroundColor).toHaveBeenCalledWith(
 			expect.objectContaining({ tabId: 7 }),
 		)
+	})
+
+	const badgeColor = () => action.setBadgeBackgroundColor.mock.calls.at(-1)?.[0]?.color
+
+	// The badge must not advertise a transpose the page isn't playing.
+	it('mutes the tint while the page waits for a click', async () => {
+		await sendBadge(badge({ semitones: 3 }))
+		const live = badgeColor()
+		await sendBadge(badge({ semitones: 3, status: 'waiting-for-gesture' }))
+		expect(badgeText()).toBe('3')
+		expect(badgeColor()).not.toBe(live)
+	})
+
+	it('flags a failed engine instead of showing the setting', async () => {
+		await sendBadge(badge({ semitones: 3, status: 'error' }))
+		expect(badgeText()).toBe('!')
 	})
 })
 
@@ -170,5 +193,12 @@ describe('background — keyboard commands', () => {
 	it('swallows a send failure without rejecting', async () => {
 		vi.spyOn(browser.tabs, 'sendMessage').mockRejectedValue(new Error('no receiving end'))
 		await expect(commandListener?.('modulate-pitch-up')).resolves.not.toThrow()
+	})
+
+	it('contains a failed active-tab lookup too', async () => {
+		vi.spyOn(browser.tabs, 'query').mockRejectedValue(new Error('boom'))
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+		await expect(commandListener?.('modulate-pitch-up')).resolves.not.toThrow()
+		expect(warn).toHaveBeenCalled()
 	})
 })

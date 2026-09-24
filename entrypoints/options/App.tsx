@@ -277,10 +277,9 @@ function App() {
 												// twenty would otherwise announce twenty buttons called "Remove".
 												aria-label={`Remove ${label}`}
 												onClick={() =>
-													void persist(async () => {
-														await removeVideoSetting(id)
-														await refresh()
-													})
+													// No re-read here: the storage watcher does it, and folding
+													// it in would report a failed read as a failed save.
+													void persist(() => removeVideoSetting(id))
 												}
 											>
 												<TrashIcon />
@@ -292,12 +291,7 @@ function App() {
 							<div className="vrow-actions">
 								<button
 									className="btn btn--danger"
-									onClick={() =>
-										void persist(async () => {
-											await clearVideoSettings()
-											await refresh()
-										})
-									}
+									onClick={() => void persist(() => clearVideoSettings())}
 								>
 									Clear all
 								</button>
