@@ -6,5 +6,5 @@
 	"jsxSingleQuote": false,
 	"trailingComma": "all",
 	"sortImports": true,
-	"ignorePatterns": ["public/soundtouch-processor.js", ".output", ".wxt"]
+	"ignorePatterns": [".output", ".wxt"]
 }

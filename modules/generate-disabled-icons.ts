@@ -9,7 +9,7 @@ import { defineWxtModule } from 'wxt/modules'
 // swaps to these per tab when the tab isn't a YouTube watch page (see
 // `entrypoints/background.ts`). Sized from `assets/icon-disabled.png` the same
 // way auto-icons sizes the active icon, so neither set is committed as derived
-// PNGs — only the two source images live in `assets/`.
+// PNGs — only the two source images are.
 //
 // `sharp` is resolved transitively (it's an `@wxt-dev/auto-icons` dependency),
 // matching that module's own usage.
@@ -30,8 +30,9 @@ export default defineWxtModule((wxt) => {
 		}
 	})
 
-	// Keep `browser.runtime.getURL('/icons-disabled/<size>.png')` typed — WXT
-	// derives the `PublicPath` union from `public/`, which doesn't hold these.
+	// Register the generated files in WXT's `PublicPath` union (derived from
+	// `public/`, which doesn't hold these), so they type-check wherever a public
+	// path is expected, e.g. `browser.runtime.getURL`.
 	wxt.hooks.hook('prepare:publicPaths', (_, paths) => {
 		for (const size of SIZES) paths.push(`${DIR}/${size}.png`)
 	})

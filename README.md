@@ -26,7 +26,8 @@ WSOLA time-stretch + Lanczos-interpolated rate transpose) for the audio processi
 - **Keyboard shortcuts** — nudge pitch/tempo without opening the popup:
   - `Ctrl+Shift+Up` / `Ctrl+Shift+Down` — pitch up / down a semitone
   - `Ctrl+Shift+Right` / `Ctrl+Shift+Left` — tempo up / down
-- **Toolbar badge** — shows when an effect is active on the current tab.
+- **Toolbar badge** — shows when an effect is active on the current tab, and when it is
+  waiting for a click in the page or has failed.
 - **Audio-quality tuning** — WSOLA knobs exposed on the options page.
 - **Saved-video management** — review, remove, or clear stored per-video settings.
 
@@ -64,27 +65,31 @@ bun run test          # vitest (happy-dom)
 bun run test:watch    # vitest watch mode
 ```
 
-Tests cover unit logic and Testing Library component specs. They do **not** exercise the
-live audio graph or the cross-realm message flow — verify those by loading the unpacked
-build and exercising the popup and options page on a real YouTube watch page.
+Tests cover the `lib/` logic, the popup and options pages (Testing Library), each
+entrypoint script on its own, and the audio engine against a fake Web Audio graph. They
+do **not** run a real audio graph or the real cross-realm message flow — verify those by
+loading the unpacked build and exercising the popup and options page on a real YouTube
+watch page.
 
 ## Release
 
-Releases to the Chrome Web Store and Firefox Add-ons are automated by the
-[`Release` workflow](.github/workflows/release.yml) — pushing a `v*` tag zips both
-targets, submits them via [`wxt submit`](https://wxt.dev/guide/essentials/publishing.html),
-and cuts a GitHub Release with auto-generated notes and the ZIPs attached.
+Releases are automated by the [`Release` workflow](.github/workflows/release.yml) —
+pushing a `v*` tag runs the type check, lint, format check and tests, then zips, submits
+via [`wxt submit`](https://wxt.dev/guide/essentials/publishing.html), and cuts a GitHub
+Release with auto-generated notes and the ZIPs attached. Only Firefox Add-ons is wired up
+for now; the Chrome Web Store steps are commented out in the workflow until the listing
+exists.
 
 One-time setup:
 
 1. `bunx wxt submit init` — interactive walkthrough that writes credentials to a local,
    git-ignored `.env.submit`.
 2. Add the resulting values as repo secrets (Settings → Secrets and variables → Actions):
+   `FIREFOX_EXTENSION_ID`, `FIREFOX_JWT_ISSUER`, `FIREFOX_JWT_SECRET` (plus
    `CHROME_EXTENSION_ID`, `CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`,
-   `CHROME_REFRESH_TOKEN`, `FIREFOX_EXTENSION_ID`, `FIREFOX_JWT_ISSUER`,
-   `FIREFOX_JWT_SECRET`.
-3. The extension must already exist in both stores — `wxt submit` updates a listing, it
-   can't create the first one.
+   `CHROME_REFRESH_TOKEN` once Chrome is enabled).
+3. The extension must already exist in each store it submits to — `wxt submit` updates
+   a listing, it can't create the first one.
 
 To ship a release, bump `version` in `package.json` (WXT reads it into the manifest),
 commit, then push a matching tag:
@@ -111,9 +116,10 @@ sandbox-created object into the page-realm worklet). So responsibilities split a
 three realms with two message hops:
 
 ```
-popup (Preact) --PopupMessage-->  content script  --ApplyMessage (JSON)-->  injected (MAIN world)
-                browser.tabs       |   ^                window.postMessage
-                .sendMessage       |   | PopupMessage (keyboard commands) /
+popup (Preact) --PopupMessage-->  content script  --ApplyMessage (JSON)-->   injected (MAIN world)
+                browser.tabs       |   ^          <--StatusMessage (JSON)--
+                .sendMessage       |   |              window.postMessage
+                                   |   | PopupMessage (keyboard commands) /
                                    |   | BadgeMessage (effective state)
                                    v   |
                               background (commands + toolbar badge)
@@ -128,11 +134,12 @@ popup (Preact) --PopupMessage-->  content script  --ApplyMessage (JSON)-->  inje
   into the page, resolves the effective pitch/tempo/quality, forwards them to the main
   world, and re-applies on SPA navigation.
 - **`entrypoints/injected.ts`** — runs in MAIN world. Owns the Web Audio graph
-  (`lib/audioEngine.ts`); finds the `<video>`, builds the graph, applies pitch + tempo.
+  (`lib/audioEngine.ts`); finds the `<video>`, builds the graph, applies pitch + tempo,
+  and reports back whether the audio is actually live.
 - **`entrypoints/background.ts`** — drives keyboard `commands` and the toolbar badge.
 
 State lives in `chrome.storage.local`: a master switch (`globalEnabled`), a
-`Record<videoId, { enabled, semitones, tempo }>` map (`videoSettings`), and shared WSOLA
+`Record<videoId, { enabled, semitones, tempo, title? }>` map (`videoSettings`), and shared WSOLA
 knobs (`audioQuality`).
 
 See [`AGENTS.md`](AGENTS.md) for the full architecture and invariants, and

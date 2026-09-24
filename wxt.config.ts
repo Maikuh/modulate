@@ -7,7 +7,8 @@ export default defineConfig({
 	vite: () => ({ plugins: [preact()] }),
 	manifest: ({ browser }) => ({
 		name: 'Modulate',
-		description: 'Transpose YouTube video audio in semitones, per video.',
+		description:
+			'Transpose YouTube audio by semitones and change its speed without changing pitch, per video.',
 		permissions: ['storage'],
 		// Grayscale toolbar icon by default; the background script swaps in the
 		// colored set per tab while on a video (see entrypoints/background.ts). The
