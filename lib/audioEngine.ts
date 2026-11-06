@@ -3,7 +3,7 @@ import { SoundTouchNode } from '@soundtouchjs/audio-worklet'
 // Side-effect-free modules — safe to pull into the MAIN-world bundle, unlike
 // `storage.ts` which touches extension APIs unavailable in the page realm.
 import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality'
-import { isNoOp, type ResolvedSetting } from '@/lib/settings'
+import type { ResolvedSetting } from '@/lib/settings'
 
 /**
  * Owns the Web Audio graph that pitch-shifts and time-stretches a single media
@@ -31,10 +31,15 @@ import { isNoOp, type ResolvedSetting } from '@/lib/settings'
  *    Capturing into a context that never starts plays the element silently, so
  *    `build()` checks the context actually runs BEFORE capturing.
  *
- * Tempo: slowing the video is done by setting the **element's** `playbackRate`
- * (which lowers pitch like a record), then mirroring that to the SoundTouch
- * `playbackRate` AudioParam so the worklet compensates pitch back to normal.
- * Transpose (`pitchSemitones`) stacks on top, independent of tempo.
+ * Tempo is always the **element's** `playbackRate`, in one of two modes:
+ *
+ *  - Tempo alone (no transpose) is the browser's own job: `preservesPitch = true`
+ *    holds pitch natively (Firefox runs SoundTouch internally, Chrome WSOLA). No
+ *    graph, no capture, no click in the page needed — and nothing of ours to fail.
+ *  - With a transpose, the worklet is in the path anyway, so the element resamples
+ *    raw (`preservesPitch = false`, pitch drops like a record) and the rate is
+ *    mirrored to the SoundTouch `playbackRate` AudioParam, which compensates it in
+ *    the same pass as the transpose (`pitchSemitones`). One stretch, not two.
  *
  * On YouTube the same `<video>` element persists across SPA navigations, so a
  * single graph built once serves every video; only the parameters change.
@@ -63,6 +68,12 @@ class AudioEngine {
 	private ctx: AudioContext | null = null
 	private source: MediaElementAudioSourceNode | null = null
 	private node: SoundTouchNode | null = null
+	/** The element the graph captured; `null` while there is no graph. */
+	private graphElement: HTMLMediaElement | null = null
+	/**
+	 * The element whose rate we control: the graph's element once there is a graph,
+	 * or the one bound with `attach` for a native (graph-less) tempo change.
+	 */
 	private element: HTMLMediaElement | null = null
 	/** The in-flight build, and the element it is capturing. */
 	private building: { el: HTMLMediaElement; promise: Promise<void> } | null = null
@@ -91,14 +102,26 @@ class AudioEngine {
 	private drivingRate = false
 
 	/**
-	 * The graph is bypassed (source wired straight to speakers) at the no-op:
-	 * no transpose AND original speed. Bypassing matters because
-	 * `createMediaElementSource` is one-shot, so without it every video runs
-	 * through continuous WSOLA processing even when untouched — needless CPU. A
-	 * crashed worklet is bypassed too, since routing through it is silence.
+	 * The graph is bypassed (source wired straight to speakers) whenever there is
+	 * no transpose: tempo alone is the browser's native time-stretch, so the worklet
+	 * has nothing to do. Bypassing matters because `createMediaElementSource` is
+	 * one-shot, so without it every video runs through continuous WSOLA processing
+	 * even when untouched — needless CPU. A crashed worklet is bypassed too, since
+	 * routing through it is silence; tempo still works there, natively.
 	 */
 	private get bypassed(): boolean {
-		return this.failed || isNoOp({ semitones: this.semitones, tempo: this.tempo })
+		return this.failed || this.semitones === 0
+	}
+
+	/**
+	 * Bind `el` as the element whose rate tempo drives, without capturing it — the
+	 * native tempo path needs no graph. Hands a previously bound element back to
+	 * the page first (YouTube swapped it).
+	 */
+	attach(el: HTMLMediaElement): void {
+		if (this.element === el) return
+		this.releaseRate()
+		this.element = el
 	}
 
 	/**
@@ -106,7 +129,7 @@ class AudioEngine {
 	 * repeatedly, including concurrently for different elements.
 	 */
 	async ensureGraph(el: HTMLMediaElement, processorUrl: string): Promise<void> {
-		if (this.element === el && this.node) return
+		if (this.graphElement === el && this.node) return
 
 		if (this.building) {
 			// Join an in-flight build only when it is capturing the same element.
@@ -134,7 +157,9 @@ class AudioEngine {
 		// of live contexts; past the cap `new AudioContext()` throws and audio dies.
 		// Closing does NOT hand the old element back to direct output (its output is
 		// just ignored from then on), which is why the swap has to build a new graph.
-		await this.dispose()
+		// The rate is left alone: a native tempo already playing on `el` keeps playing
+		// through the build instead of blipping back to 1× and forward again.
+		await this.disposeGraph()
 
 		if (this.captured.has(el)) {
 			throw new Error(
@@ -178,7 +203,7 @@ class AudioEngine {
 			node.setStretchParameters(this.quality)
 			source = ctx.createMediaElementSource(el)
 		} catch (err) {
-			await this.dispose()
+			await this.disposeGraph()
 			throw err
 		}
 
@@ -190,7 +215,8 @@ class AudioEngine {
 		this.captured.add(el)
 		this.node = node
 		this.source = source
-		this.element = el
+		this.graphElement = el
+		this.attach(el)
 		// The worklet pipeline trails its input by ~80–175 ms (`lib/pipeline.test.ts`)
 		// and the video isn't delayed to match; this is the context's share on top of
 		// that, which only the browser knows.
@@ -220,9 +246,9 @@ class AudioEngine {
 		this.node.disconnect()
 		try {
 			if (this.bypassed) {
-				// Restore native speed + pitch preservation; the worklet's params are moot
-				// while disconnected.
-				this.releaseRate()
+				// Tempo goes native (pitch preserved by the element); the worklet's params
+				// are moot while disconnected.
+				this.applyNativeRate()
 				this.source.connect(this.ctx.destination)
 			} else {
 				this.applyLive()
@@ -252,12 +278,8 @@ class AudioEngine {
 
 	/** Push the current params into the live graph without re-routing (no seam). */
 	private applyLive(): void {
-		if (!this.node) return
-		if (this.bypassed) {
-			// Only reachable here with a crashed worklet (a no-op keeps tempo at 1, which
-			// releases the rate below anyway). Nothing compensates pitch, so the rate stays
-			// the page's.
-			this.releaseRate()
+		if (!this.node || this.bypassed) {
+			this.applyNativeRate()
 			return
 		}
 		this.node.pitchSemitones.value = this.semitones
@@ -281,6 +303,20 @@ class AudioEngine {
 		// double-correction — speed would then shift pitch. Turn it off so the
 		// element feeds the worklet the resampled signal its math expects.
 		this.setPreservesPitch(false)
+		this.element.playbackRate = this.tempo
+		this.drivingRate = true
+	}
+
+	/**
+	 * Tempo without the worklet: the element time-stretches with its own pitch
+	 * preservation. At tempo 1 the rate is the page's (see `releaseRate`).
+	 */
+	private applyNativeRate(): void {
+		if (this.tempo === 1 || !this.element) {
+			this.releaseRate()
+			return
+		}
+		this.setPreservesPitch(true)
 		this.element.playbackRate = this.tempo
 		this.drivingRate = true
 	}
@@ -314,6 +350,19 @@ class AudioEngine {
 		return this.node !== null
 	}
 
+	/** Whether an element is bound (by a graph or a native tempo change). */
+	get hasElement(): boolean {
+		return this.element !== null
+	}
+
+	/**
+	 * Whether `el`'s audio flows through our context — then it is only audible while
+	 * the context runs, whatever the routing.
+	 */
+	captures(el: HTMLMediaElement): boolean {
+		return this.node !== null && this.graphElement === el
+	}
+
 	/**
 	 * Whether the context is actually processing. `resume()` resolving is not proof
 	 * of this — autoplay policy can leave the context suspended, and a suspended
@@ -332,7 +381,7 @@ class AudioEngine {
 		const was = this.bypassed
 		if (setting.semitones !== undefined) this.semitones = setting.semitones
 		if (setting.tempo !== undefined) this.tempo = setting.tempo
-		if (was !== this.bypassed) this.route()
+		if (this.node && was !== this.bypassed) this.route()
 		else this.applyLive()
 	}
 
@@ -361,21 +410,30 @@ class AudioEngine {
 	}
 
 	/**
-	 * Tear down the graph and close the context. Used on element swap (above), so
-	 * repeated swaps don't exhaust the browser's context cap, and on real page
-	 * unload. Note that closing does NOT hand the captured element back to the
-	 * speakers — per spec its output is simply ignored from then on — which is why
-	 * a swap must rebuild rather than merely dispose.
+	 * Tear down the graph and hand the element back to native playback. Used on real
+	 * page unload. Note that closing does NOT hand a captured element back to the
+	 * speakers — per spec its output is simply ignored from then on.
 	 */
 	async dispose(): Promise<void> {
+		await this.disposeGraph()
+		this.releaseRate()
+		this.element = null
+	}
+
+	/**
+	 * Close the context and drop the graph, leaving the element's rate as it is.
+	 * Used on element swap (above), so repeated swaps don't exhaust the browser's
+	 * context cap — a swap must rebuild rather than merely dispose, since closing
+	 * does not release the captured element.
+	 */
+	private async disposeGraph(): Promise<void> {
 		this.node?.disconnect()
 		this.source?.disconnect()
-		this.releaseRate()
 		const ctx = this.ctx
 		this.ctx = null
 		this.node = null
 		this.source = null
-		this.element = null
+		this.graphElement = null
 		this.failed = false
 		if (ctx && ctx.state !== 'closed') {
 			// A close that silently fails is what drives the context cap to exhaustion,

@@ -217,7 +217,7 @@ describe('AudioEngine — routing', () => {
 			configurable: true,
 		})
 
-		expect(() => engine.apply({ tempo: 1.5 })).toThrow(TypeError)
+		expect(() => engine.apply({ semitones: 3, tempo: 1.5 })).toThrow(TypeError)
 		expect(source.reaches(currentCtx().destination)).toBe(true)
 	})
 
@@ -240,9 +240,9 @@ describe('AudioEngine — routing', () => {
 			configurable: true,
 		})
 
-		expect(() => engine.apply({ tempo: 1.5 })).toThrow(TypeError)
+		expect(() => engine.apply({ semitones: 3, tempo: 1.5 })).toThrow(TypeError)
 		fail = false
-		engine.apply({ tempo: 1.25 })
+		engine.apply({ semitones: 3, tempo: 1.25 })
 
 		expect(currentSource().outputs.has(worklet)).toBe(true)
 		expect(el.preservesPitch).toBe(false)
@@ -261,7 +261,8 @@ describe('AudioEngine — routing', () => {
 	})
 
 	// A crashed worklet outputs silence forever. Routing around it keeps the video
-	// audible (untransposed) instead of muted until a reload.
+	// audible (untransposed) instead of muted until a reload — and the tempo keeps
+	// working, natively.
 	it('bypasses a worklet that raised processorerror, and stays bypassed', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {})
 		const engine = await freshEngine()
@@ -274,11 +275,12 @@ describe('AudioEngine — routing', () => {
 		const { destination } = currentCtx()
 		expect(currentSource().outputs.has(destination)).toBe(true)
 		expect(el.preservesPitch).toBe(true)
-		expect(el.playbackRate).toBe(1)
+		expect(el.playbackRate).toBe(1.5)
 
 		engine.apply({ semitones: 5, tempo: 1.25 })
 		expect(currentSource().outputs.has(destination)).toBe(true)
-		expect(el.playbackRate).toBe(1)
+		expect(el.preservesPitch).toBe(true)
+		expect(el.playbackRate).toBe(1.25)
 	})
 
 	it('pushes pitch and tempo into the worklet params', async () => {
@@ -290,6 +292,84 @@ describe('AudioEngine — routing', () => {
 
 		expect(currentWorklet().pitchSemitones.value).toBe(-3)
 		expect(currentWorklet().playbackRate.value).toBe(0.75)
+	})
+})
+
+describe('AudioEngine — native tempo', () => {
+	// Tempo alone is the browser's own time-stretch: no worklet, pitch preserved by
+	// the element itself.
+	it('keeps the worklet out of the path for tempo alone', async () => {
+		const engine = await freshEngine()
+		const el = makeVideo()
+		await engine.ensureGraph(el, PROCESSOR_URL)
+
+		engine.apply({ tempo: 1.5 })
+
+		expect(currentSource().outputs.has(currentCtx().destination)).toBe(true)
+		expect(currentSource().outputs.has(currentWorklet())).toBe(false)
+		expect(el.preservesPitch).toBe(true)
+		expect(el.playbackRate).toBe(1.5)
+	})
+
+	it('drives an attached element without building a graph', async () => {
+		const engine = await freshEngine()
+		const el = makeVideo()
+
+		engine.attach(el)
+		engine.apply({ semitones: 0, tempo: 0.75 })
+
+		expect(FakeAudioContext.created).toHaveLength(0)
+		expect(engine.hasGraph).toBe(false)
+		expect(el.preservesPitch).toBe(true)
+		expect(el.playbackRate).toBe(0.75)
+	})
+
+	it('hands the old element back when another is attached', async () => {
+		const engine = await freshEngine()
+		const first = makeVideo()
+		const second = makeVideo()
+		engine.attach(first)
+		engine.apply({ tempo: 1.5 })
+
+		engine.attach(second)
+		engine.apply({ tempo: 1.5 })
+
+		expect(first.playbackRate).toBe(1)
+		expect(second.playbackRate).toBe(1.5)
+	})
+
+	// The build awaits the autoplay probe and the module fetch; a native tempo that
+	// is already playing must not drop to 1× for that long and jump back.
+	it('keeps a native tempo playing through a graph build', async () => {
+		const engine = await freshEngine()
+		const el = makeVideo()
+		engine.attach(el)
+		engine.apply({ tempo: 1.5 })
+		const rates: number[] = []
+		FakeSoundTouchNode.register.mockImplementation(async () => {
+			rates.push(el.playbackRate)
+		})
+
+		await engine.ensureGraph(el, PROCESSOR_URL)
+		engine.apply({ semitones: 4 })
+
+		expect(rates).toEqual([1.5])
+		expect(el.preservesPitch).toBe(false)
+		expect(el.playbackRate).toBe(1.5)
+		expect(currentWorklet().playbackRate.value).toBe(1.5)
+	})
+
+	it('switches pitch preservation back on when the transpose is dropped', async () => {
+		const engine = await freshEngine()
+		const el = makeVideo()
+		await engine.ensureGraph(el, PROCESSOR_URL)
+		engine.apply({ semitones: 3, tempo: 1.25 })
+		expect(el.preservesPitch).toBe(false)
+
+		engine.apply({ semitones: 0 })
+
+		expect(el.preservesPitch).toBe(true)
+		expect(el.playbackRate).toBe(1.25)
 	})
 })
 

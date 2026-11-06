@@ -178,6 +178,16 @@ export default defineUnlistedScript(() => {
 	}
 
 	/**
+	 * While the transpose waits for a gesture, play the tempo natively: it needs no
+	 * audio context, so there is no reason to hold it back too.
+	 */
+	function waitNatively(el: HTMLVideoElement, msg: ApplyMessage): AudioStatus {
+		audioEngine.attach(el)
+		audioEngine.apply({ semitones: 0, tempo: msg.tempo })
+		return 'waiting-for-gesture'
+	}
+
+	/**
 	 * Converge the engine onto `msg`. Only ever called by `drain`, one at a time.
 	 * After each await it bails if `lastMsg` moved meanwhile (`dirty`): the worker
 	 * loops straight on to the newer message, so a stale one is never applied.
@@ -185,13 +195,13 @@ export default defineUnlistedScript(() => {
 	 */
 	async function apply(msg: ApplyMessage): Promise<AudioStatus | null> {
 		if (isNoOp(msg)) {
-			// Lazy capture: leave the <video> untouched until a real change (transpose or
-			// tempo) is asked for. `createMediaElementSource` is irreversible and reroutes
-			// ALL audio through Web Audio — capturing for a no-op needlessly exposes
-			// normal playback to any graph/worklet fault.
-			if (!audioEngine.hasGraph) return 'idle'
-			// A graph already exists: bypass it in place and return WITHOUT re-resolving
-			// the element. Leaving a watch page for the feed resolves to a no-op, and
+			// Lazy capture: leave the <video> untouched until a transpose is asked for.
+			// `createMediaElementSource` is irreversible and reroutes ALL audio through
+			// Web Audio — capturing for a no-op needlessly exposes normal playback to any
+			// graph/worklet fault.
+			if (!audioEngine.hasElement) return 'idle'
+			// An element is already bound: return it to native playback in place WITHOUT
+			// re-resolving it. Leaving a watch page for the feed resolves to a no-op, and
 			// `findVideo` off a watch page can legitimately match a hover-preview — which
 			// would send `ensureGraph` down its element-swap path, disposing the working
 			// context and irreversibly capturing the wrong <video>.
@@ -199,9 +209,9 @@ export default defineUnlistedScript(() => {
 			return 'applied'
 		}
 
-		// The autoplay policy already refused this page; don't ask again until the
-		// page sees a gesture. Once a graph exists, re-applies never ask at all.
-		if (!audioEngine.hasGraph && blocked) return 'waiting-for-gesture'
+		// Only a transpose needs the graph; tempo alone is the element's native
+		// time-stretch, which needs neither a capture nor a gesture.
+		const needsGraph = msg.semitones !== 0
 
 		const el = await waitForVideo()
 		if (dirty) return null
@@ -219,26 +229,35 @@ export default defineUnlistedScript(() => {
 			overlapMs: msg.overlapMs,
 			quickSeek: msg.quickSeek,
 		})
-		try {
-			await audioEngine.ensureGraph(el, msg.processorUrl)
-		} catch (err) {
-			// The first build asks the browser whether audio may start, and captures
-			// nothing when it may not. That can't be predicted from here: sticky
-			// activation (`navigator.userActivation`) is one way in, but browsers also
-			// let trusted sites start audio without it — Chrome's media engagement
-			// score, which regular YouTube viewers clear, or a Firefox per-site
-			// permission. When the answer is no, wait for a pointerdown/keydown in the
-			// page itself: popup clicks and shortcuts happen in another browsing
-			// context and grant this document nothing.
-			if (!(err instanceof AudioBlockedError)) throw err
-			blocked = true
-			hookGesture()
-			return dirty ? null : 'waiting-for-gesture'
+		// The autoplay policy already refused this page; don't ask again until the
+		// page sees a gesture. Once a graph exists, re-applies never ask at all.
+		if (needsGraph && !audioEngine.hasGraph && blocked) return waitNatively(el, msg)
+		if (needsGraph) {
+			try {
+				await audioEngine.ensureGraph(el, msg.processorUrl)
+			} catch (err) {
+				// The first build asks the browser whether audio may start, and captures
+				// nothing when it may not. That can't be predicted from here: sticky
+				// activation (`navigator.userActivation`) is one way in, but browsers also
+				// let trusted sites start audio without it — Chrome's media engagement
+				// score, which regular YouTube viewers clear, or a Firefox per-site
+				// permission. When the answer is no, wait for a pointerdown/keydown in the
+				// page itself: popup clicks and shortcuts happen in another browsing
+				// context and grant this document nothing.
+				if (!(err instanceof AudioBlockedError)) throw err
+				blocked = true
+				hookGesture()
+				return dirty ? null : waitNatively(el, msg)
+			}
+			if (dirty) return null
+		} else {
+			audioEngine.attach(el)
 		}
-		if (dirty) return null
 		audioEngine.apply({ semitones: msg.semitones, tempo: msg.tempo })
+		// A captured element is audible only while its context runs, bypassed or not.
 		// The build only captures into a running context, but a browser can still
 		// suspend one later (e.g. on some audio-session interruptions).
+		if (!audioEngine.captures(el)) return 'applied'
 		await audioEngine.resume()
 		if (!audioEngine.running) {
 			console.warn('[modulate] audio context did not resume; click the page to start audio')

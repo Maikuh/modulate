@@ -9,7 +9,10 @@ vi.mock('@/lib/audioEngine', () => ({
 	AudioBlockedError: class AudioBlockedError extends Error {},
 	audioEngine: {
 		hasGraph: false,
+		hasElement: false,
 		running: true,
+		attach: vi.fn(),
+		captures: vi.fn(),
 		ensureGraph: vi.fn().mockResolvedValue(undefined),
 		applyQuality: vi.fn(),
 		apply: vi.fn(),
@@ -33,6 +36,7 @@ function audioAllowed(allowed: boolean): void {
 	engine.ensureGraph.mockImplementation(async () => {
 		if (!allowed) throw new AudioBlockedError()
 		engine.hasGraph = true
+		engine.hasElement = true
 	})
 }
 const PROCESSOR_URL = 'chrome-extension://abc123/soundtouch-processor.js'
@@ -105,7 +109,12 @@ function mountVideo(className = 'html5-main-video'): HTMLVideoElement {
 beforeEach(() => {
 	vi.clearAllMocks()
 	engine.hasGraph = false
+	engine.hasElement = false
 	engine.running = true
+	engine.attach.mockImplementation(() => {
+		engine.hasElement = true
+	})
+	engine.captures.mockImplementation(() => engine.hasGraph)
 	// Like the real engine, a completed build means a graph exists. A hand-set flag
 	// alone lets the tests describe states the script can never actually reach.
 	audioAllowed(true)
@@ -175,10 +184,18 @@ describe('injected script — lazy capture', () => {
 		expect(engine.apply).not.toHaveBeenCalled()
 	})
 
-	it('builds for a real pitch or tempo change', async () => {
+	it('builds for a transpose', async () => {
 		await post(message({ semitones: 2 }))
 		expect(engine.ensureGraph).toHaveBeenCalledWith(expect.anything(), PROCESSOR_URL)
 		expect(engine.apply).toHaveBeenCalledWith(expect.objectContaining({ semitones: 2 }))
+	})
+
+	// Tempo alone is the element's native time-stretch: no capture at all.
+	it('applies tempo alone natively, without a graph', async () => {
+		await post(message({ tempo: 1.5 }))
+		expect(engine.ensureGraph).not.toHaveBeenCalled()
+		expect(engine.attach).toHaveBeenCalledOnce()
+		expect(engine.apply).toHaveBeenCalledWith({ semitones: 0, tempo: 1.5 })
 	})
 
 	// Leaving a watch page for the feed resolves to a no-op. Re-resolving the
@@ -186,6 +203,7 @@ describe('injected script — lazy capture', () => {
 	// swap path: dispose the working context and capture the wrong <video>.
 	it('bypasses an existing graph in place, without re-resolving the element', async () => {
 		engine.hasGraph = true
+		engine.hasElement = true
 		await post(message({ semitones: 0, tempo: 1 }))
 
 		expect(engine.ensureGraph).not.toHaveBeenCalled()
@@ -326,7 +344,7 @@ describe('injected script — autoplay gate', () => {
 		start()
 
 		await post(message({ semitones: 4 }))
-		expect(engine.apply).not.toHaveBeenCalled()
+		expect(engine.apply).not.toHaveBeenCalledWith(expect.objectContaining({ semitones: 4 }))
 
 		// A real pointerdown grants the page activation, so the browser now says yes.
 		audioAllowed(true)
@@ -387,8 +405,34 @@ describe('injected script — autoplay gate', () => {
 		await tick()
 
 		expect(engine.ensureGraph).toHaveBeenCalledTimes(2)
-		expect(engine.apply).not.toHaveBeenCalled()
+		expect(engine.apply).not.toHaveBeenCalledWith(expect.objectContaining({ semitones: 4 }))
 		expect(seen.at(-1)).toContain('waiting-for-gesture')
+	})
+
+	// The tempo needs no audio context, so it plays natively while the transpose waits.
+	it('applies the tempo natively while the transpose waits for a gesture', async () => {
+		audioAllowed(false)
+		mountVideo()
+		start()
+
+		await post(message({ semitones: 4, tempo: 1.25 }))
+		expect(engine.apply).toHaveBeenLastCalledWith({ semitones: 0, tempo: 1.25 })
+
+		// Still refused, and not asked again — but a tempo nudge still lands.
+		await post(message({ semitones: 4, tempo: 1.5 }))
+		expect(engine.ensureGraph).toHaveBeenCalledOnce()
+		expect(engine.apply).toHaveBeenLastCalledWith({ semitones: 0, tempo: 1.5 })
+	})
+
+	it('needs no gesture for tempo alone', async () => {
+		audioAllowed(false)
+		mountVideo()
+		start()
+
+		await post(message({ tempo: 0.75 }))
+
+		expect(engine.ensureGraph).not.toHaveBeenCalled()
+		expect(engine.apply).toHaveBeenCalledWith({ semitones: 0, tempo: 0.75 })
 	})
 })
 
@@ -418,6 +462,7 @@ describe('injected script — latest settings win', () => {
 		await post(message({ semitones: 4 }))
 		await post(message({ semitones: 6 }))
 		audioAllowed(true)
+		engine.apply.mockClear()
 		window.dispatchEvent(new Event('keydown'))
 		await tick()
 
@@ -436,6 +481,7 @@ describe('injected script — latest settings win', () => {
 				new Promise<void>((resolve) => {
 					release = () => {
 						engine.hasGraph = true
+						engine.hasElement = true
 						resolve()
 					}
 				}),
@@ -459,6 +505,7 @@ describe('injected script — latest settings win', () => {
 				new Promise<void>((resolve) => {
 					release = () => {
 						engine.hasGraph = true
+						engine.hasElement = true
 						resolve()
 					}
 				}),
@@ -586,6 +633,16 @@ describe('injected script — status reports', () => {
 		const seen = collectStatuses()
 
 		await post(message({ semitones: 2 }))
+
+		expect(seen).toEqual(['applied'])
+	})
+
+	it('reports applied for tempo alone, with no graph', async () => {
+		mountVideo()
+		start()
+		const seen = collectStatuses()
+
+		await post(message({ tempo: 1.5 }))
 
 		expect(seen).toEqual(['applied'])
 	})
