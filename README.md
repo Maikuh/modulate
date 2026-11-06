@@ -6,8 +6,9 @@ per video. Settings persist per YouTube video ID, so each video remembers its ow
 and tempo.
 
 Built with [WXT](https://wxt.dev) + [Preact](https://preactjs.com), using
-[`@soundtouchjs/audio-worklet`](https://github.com/cutterbl/SoundTouchJS) (SoundTouch
-WSOLA time-stretch + Lanczos-interpolated rate transpose) for the audio processing.
+[Signalsmith Stretch](https://signalsmith-audio.co.uk/code/stretch/) (a WASM phase-vocoder
+pitch shifter, in an AudioWorklet) for the audio processing. Tempo on its own uses the
+browser's native pitch-preserving playback rate.
 
 <!-- <a href="https://www.buymeacoffee.com/maikuh" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-orange.png" alt="Buy Me a Coffee" style="height: 48px !important;width: 198px !important;" ></a> -->
 
@@ -28,7 +29,6 @@ WSOLA time-stretch + Lanczos-interpolated rate transpose) for the audio processi
   - `Ctrl+Shift+Right` / `Ctrl+Shift+Left` — tempo up / down
 - **Toolbar badge** — shows when an effect is active on the current tab, and when it is
   waiting for a click in the page or has failed.
-- **Audio-quality tuning** — WSOLA knobs exposed on the options page.
 - **Saved-video management** — review, remove, or clear stored per-video settings.
 
 ## Install (development)
@@ -128,11 +128,10 @@ popup (Preact) --PopupMessage-->  content script  --ApplyMessage (JSON)-->   inj
 - **`entrypoints/popup/`** — Preact UI. A thin remote: sends messages to the active
   tab's content script and renders the returned player state, keeping the engine
   status live while open. Owns no logic.
-- **`entrypoints/options/`** — Preact UI. Edits storage directly: global switch, shared
-  WSOLA quality knobs, saved per-video settings. Content scripts re-apply live via
-  `storage.watch`.
+- **`entrypoints/options/`** — Preact UI. Edits storage directly: global switch and
+  saved per-video settings. Content scripts re-apply live via storage watchers.
 - **`entrypoints/content.ts`** — runs on YouTube. Owns storage. Injects `injected.js`
-  into the page, resolves the effective pitch/tempo/quality, forwards them to the main
+  into the page, resolves the effective pitch/tempo, forwards them to the main
   world, and re-applies on SPA navigation.
 - **`entrypoints/injected.ts`** — runs in MAIN world. Owns the Web Audio graph
   (`lib/audioEngine.ts`); finds the `<video>`, builds the graph for a transpose, applies
@@ -140,9 +139,8 @@ popup (Preact) --PopupMessage-->  content script  --ApplyMessage (JSON)-->   inj
   uses the browser's native pitch-preserving `playbackRate` and builds no graph.
 - **`entrypoints/background.ts`** — drives keyboard `commands` and the toolbar badge.
 
-State lives in `chrome.storage.local`: a master switch (`globalEnabled`), one
-`{ enabled, semitones, tempo, title? }` entry per tuned video (`video:<videoId>`), and shared
-WSOLA knobs (`audioQuality`).
+State lives in `chrome.storage.local`: a master switch (`globalEnabled`) and one
+`{ enabled, semitones, tempo, title? }` entry per tuned video (`video:<videoId>`).
 
 See [`AGENTS.md`](AGENTS.md) for the full architecture and invariants, and
 [`ROADMAP.md`](ROADMAP.md) for planned work.
