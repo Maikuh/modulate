@@ -252,20 +252,20 @@ export default defineContentScript({
 		)
 
 		// Re-apply on YouTube's SPA navigation (same element, new video ID). Sync
-		// `lastUrl` so the poll below doesn't fire a second redundant apply.
+		// `lastUrl` so the location watcher below doesn't fire a second redundant apply.
 		let lastUrl = location.href
 		ctx.addEventListener(document, 'yt-navigate-finish', () => {
 			lastUrl = location.href
 			scheduleApply('navigation')
 		})
 
-		// Fallback: catch URL changes the event might miss.
-		ctx.setInterval(() => {
-			if (location.href !== lastUrl) {
-				lastUrl = location.href
-				scheduleApply('url-poll')
-			}
-		}, 1000)
+		// Fallback: catch URL changes the event might miss. WXT's watcher uses the
+		// Navigation API where the browser has it and polls the URL otherwise.
+		ctx.addEventListener(window, 'wxt:locationchange', () => {
+			if (location.href === lastUrl) return
+			lastUrl = location.href
+			scheduleApply('location-change')
+		})
 
 		// Re-apply when settings change elsewhere (another tab, the options page edits
 		// storage directly), so the active tab reflects edits live. Only this tab's
