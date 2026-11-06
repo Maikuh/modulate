@@ -118,15 +118,16 @@ three realms with two message hops:
 ```
 popup (Preact) --PopupMessage-->  content script  --ApplyMessage (JSON)-->   injected (MAIN world)
                 browser.tabs       |   ^          <--StatusMessage (JSON)--
-                .sendMessage       |   |              window.postMessage
+                .sendMessage       |   |          CustomEvents on the injected <script>
                                    |   | PopupMessage (keyboard commands) /
-                                   |   | BadgeMessage (effective state)
+                                   |   | BadgeMessage (effective state; the open popup listens too)
                                    v   |
                               background (commands + toolbar badge)
 ```
 
 - **`entrypoints/popup/`** — Preact UI. A thin remote: sends messages to the active
-  tab's content script and renders the returned player state. Owns no logic.
+  tab's content script and renders the returned player state, keeping the engine
+  status live while open. Owns no logic.
 - **`entrypoints/options/`** — Preact UI. Edits storage directly: global switch, shared
   WSOLA quality knobs, saved per-video settings. Content scripts re-apply live via
   `storage.watch`.
@@ -134,13 +135,14 @@ popup (Preact) --PopupMessage-->  content script  --ApplyMessage (JSON)-->   inj
   into the page, resolves the effective pitch/tempo/quality, forwards them to the main
   world, and re-applies on SPA navigation.
 - **`entrypoints/injected.ts`** — runs in MAIN world. Owns the Web Audio graph
-  (`lib/audioEngine.ts`); finds the `<video>`, builds the graph, applies pitch + tempo,
-  and reports back whether the audio is actually live.
+  (`lib/audioEngine.ts`); finds the `<video>`, builds the graph for a transpose, applies
+  pitch + tempo, and reports back whether the audio is actually live. Tempo on its own
+  uses the browser's native pitch-preserving `playbackRate` and builds no graph.
 - **`entrypoints/background.ts`** — drives keyboard `commands` and the toolbar badge.
 
-State lives in `chrome.storage.local`: a master switch (`globalEnabled`), a
-`Record<videoId, { enabled, semitones, tempo, title? }>` map (`videoSettings`), and shared WSOLA
-knobs (`audioQuality`).
+State lives in `chrome.storage.local`: a master switch (`globalEnabled`), one
+`{ enabled, semitones, tempo, title? }` entry per tuned video (`video:<videoId>`), and shared
+WSOLA knobs (`audioQuality`).
 
 See [`AGENTS.md`](AGENTS.md) for the full architecture and invariants, and
 [`ROADMAP.md`](ROADMAP.md) for planned work.
