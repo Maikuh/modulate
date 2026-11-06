@@ -8,7 +8,8 @@
  *
  * A third actor, the background script, drives keyboard `commands` (sending
  * `PopupMessage`s to the active tab) and renders the toolbar badge (receiving a
- * `BadgeMessage` from the content script).
+ * `BadgeMessage` from the content script). An open popup listens for the same
+ * `BadgeMessage` to keep its engine status live.
  *
  * The content/page hop runs over the injected `<script>` element as a private
  * channel (`APPLY_EVENT` / `STATUS_EVENT` CustomEvents carrying JSON strings),
@@ -63,6 +64,8 @@ export interface BadgeMessage {
 	tempo: number
 	/** What the page engine last reported for those settings. */
 	status: AudioStatus
+	/** Increments with every status change in the tab (see `PlayerState.audioSeq`). */
+	audioSeq: number
 }
 
 /** CustomEvent (on the injected `<script>`) carrying an `ApplyMessage` JSON string. */
@@ -180,6 +183,12 @@ export interface PlayerState {
 	tempo: number
 	/** What the page engine last reported (see `AudioStatus`). */
 	audio: AudioStatus
+	/**
+	 * Increments with every change of `audio` in the tab. The page answers an apply
+	 * after the popup's reply has left, so the popup takes later statuses from
+	 * `BadgeMessage`s — and needs this to tell which of the two is newer.
+	 */
+	audioSeq: number
 }
 
 /**

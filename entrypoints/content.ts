@@ -64,17 +64,21 @@ export default defineContentScript({
 		// What the page engine last reported, and the badge it annotates. The engine
 		// answers each apply asynchronously, so the badge is re-sent when it does.
 		let audioStatus: AudioStatus = 'idle'
-		let lastBadge: Omit<BadgeMessage, 'status'> | null = null
+		// Bumped with every status change, so the popup can order a reply it got
+		// against a later status push (see `PlayerState.audioSeq`).
+		let audioSeq = 0
+		let lastBadge: Omit<BadgeMessage, 'status' | 'audioSeq'> | null = null
 
 		function setAudioStatus(status: AudioStatus): void {
 			if (status === audioStatus) return
 			audioStatus = status
+			audioSeq++
 			sendBadge()
 		}
 
 		function sendBadge(): void {
 			if (!lastBadge) return
-			const badge: BadgeMessage = { ...lastBadge, status: audioStatus }
+			const badge: BadgeMessage = { ...lastBadge, status: audioStatus, audioSeq }
 			// Logged rather than swallowed: a lost badge message means the toolbar keeps
 			// advertising the PREVIOUS video's state, which is worse than blank. Routine
 			// when the extension was reloaded under this tab or the tab is closing.
@@ -100,6 +104,7 @@ export default defineContentScript({
 				semitones: setting.semitones,
 				tempo: setting.tempo,
 				audio: audioStatus,
+				audioSeq,
 			}
 		}
 

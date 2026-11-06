@@ -490,6 +490,7 @@ describe('content script', () => {
 				semitones: 3,
 				tempo: 1,
 				status: 'idle',
+				audioSeq: 0,
 			})
 			cs.stop()
 		})
@@ -504,9 +505,12 @@ describe('content script', () => {
 			await tick()
 
 			expect(browser.runtime.sendMessage).toHaveBeenLastCalledWith(
-				expect.objectContaining({ semitones: 3, status: 'waiting-for-gesture' }),
+				expect.objectContaining({ semitones: 3, status: 'waiting-for-gesture', audioSeq: 1 }),
 			)
-			expect((await send({ type: 'GET_STATE' })).audio).toBe('waiting-for-gesture')
+			expect(await send({ type: 'GET_STATE' })).toMatchObject({
+				audio: 'waiting-for-gesture',
+				audioSeq: 1,
+			})
 			cs.stop()
 		})
 

@@ -39,6 +39,7 @@ function badge(overrides: Partial<BadgeMessage> = {}): BadgeMessage {
 		semitones: 0,
 		tempo: 1,
 		status: 'applied',
+		audioSeq: 0,
 		...overrides,
 	}
 }

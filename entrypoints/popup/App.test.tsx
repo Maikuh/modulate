@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 
-import type { PlayerState, PopupMessage, PopupResponse } from '@/lib/messaging'
+import type { BadgeMessage, PlayerState, PopupMessage, PopupResponse } from '@/lib/messaging'
 
 import App from './App'
 
@@ -14,6 +14,21 @@ const activeState: PlayerState = {
 	semitones: 0,
 	tempo: 1,
 	audio: 'applied',
+	audioSeq: 0,
+}
+
+/** The status update a content script sends the extension (tab 1 unless given). */
+async function pushStatus(status: BadgeMessage['status'], audioSeq: number, tabId = 1) {
+	const msg: BadgeMessage = {
+		type: 'MODULATE_BADGE',
+		onVideo: true,
+		semitones: 3,
+		tempo: 1,
+		status,
+		audioSeq,
+	}
+	// Listeners take a third `sendResponse`; the popup's never answers, so any will do.
+	await fakeBrowser.runtime.onMessage.trigger(msg, { tab: { id: tabId } } as never, () => {})
 }
 
 const NO_RECEIVER = 'Could not establish connection. Receiving end does not exist.'
@@ -155,5 +170,61 @@ describe('popup App', () => {
 		mockTabs({ ...activeState, semitones: 3, audio: 'error' })
 		const view = renderApp()
 		expect(await view.findByRole('status')).toHaveTextContent(/failed/i)
+	})
+
+	describe('live engine status', () => {
+		// A change replies before the page has applied it, so the reply carries the
+		// old status; the page's answer arrives afterwards and must still show.
+		it('shows a status the page reports after the popup opened', async () => {
+			mockTabs({ ...activeState, semitones: 3 })
+			const view = renderApp()
+			await view.findByText('Pitch')
+			expect(view.queryByRole('status')).not.toBeInTheDocument()
+
+			await pushStatus('waiting-for-gesture', 1)
+
+			expect(await view.findByRole('status')).toHaveTextContent(/Click anywhere/i)
+		})
+
+		it('ignores another tab', async () => {
+			mockTabs({ ...activeState, semitones: 3 })
+			const view = renderApp()
+			await view.findByText('Pitch')
+
+			await pushStatus('error', 1, 2)
+
+			expect(view.queryByRole('status')).not.toBeInTheDocument()
+		})
+
+		it('keeps a pushed status over an older one in a later reply', async () => {
+			const sendMessage = mockTabs({ ...activeState, semitones: 3 })
+			const view = renderApp()
+			await view.findByText('Pitch')
+			await pushStatus('waiting-for-gesture', 2)
+			sendMessage.mockResolvedValue({
+				ok: true,
+				state: { ...activeState, semitones: 4, audio: 'applied', audioSeq: 1 },
+			} satisfies PopupResponse as never)
+
+			await userEvent.click(view.getByRole('button', { name: 'Increase Pitch' }))
+
+			expect(await view.findByText('+4')).toBeInTheDocument()
+			expect(view.getByRole('status')).toHaveTextContent(/Click anywhere/i)
+		})
+
+		it('takes a newer status from a reply', async () => {
+			const sendMessage = mockTabs({ ...activeState, semitones: 3 })
+			const view = renderApp()
+			await view.findByText('Pitch')
+			await pushStatus('waiting-for-gesture', 1)
+			sendMessage.mockResolvedValue({
+				ok: true,
+				state: { ...activeState, semitones: 4, audio: 'applied', audioSeq: 2 },
+			} satisfies PopupResponse as never)
+
+			await userEvent.click(view.getByRole('button', { name: 'Increase Pitch' }))
+
+			await waitFor(() => expect(view.queryByRole('status')).not.toBeInTheDocument())
+		})
 	})
 })

@@ -5,6 +5,7 @@ import { Logo, PitchIcon, TempoIcon, ResetIcon, GearIcon } from '@/lib/icons'
 import {
 	logSendFailure,
 	type AudioStatus,
+	type BadgeMessage,
 	type PlayerState,
 	type PopupMessage,
 	type PopupResponse,
@@ -16,7 +17,7 @@ import { Toggle } from './components/Toggle'
 
 type SendResult =
 	/** The content script answered with the tab's state. */
-	| { kind: 'state'; state: PlayerState }
+	| { kind: 'state'; state: PlayerState; tabId: number }
 	/** The content script answered, but handling the message failed. */
 	| { kind: 'failed' }
 	/** No content script answered. `url` only when the browser lets us read it. */
@@ -45,7 +46,17 @@ async function send(msg: PopupMessage): Promise<SendResult> {
 		return { kind: 'unreachable', url: tab.url }
 	}
 	if (!res) return { kind: 'unreachable', url: tab.url }
-	return res.ok ? { kind: 'state', state: res.state } : { kind: 'failed' }
+	return res.ok ? { kind: 'state', state: res.state, tabId: tab.id } : { kind: 'failed' }
+}
+
+/**
+ * `next`, keeping `current`'s engine status when that one is newer. The page
+ * answers an apply after the content script's reply has left, so a status pushed
+ * meanwhile (see the listener in `App`) can be newer than the reply's.
+ */
+function newest(current: PlayerState | null, next: PlayerState): PlayerState {
+	if (!current || current.audioSeq <= next.audioSeq) return next
+	return { ...next, audio: current.audio, audioSeq: current.audioSeq }
 }
 
 /** Why the controls can't be shown, as the message to show instead. */
@@ -77,13 +88,17 @@ function App() {
 	const initial = useSignal<SendResult | null>(null)
 	const error = useSignal<string | null>(null)
 	const loading = useSignal(true)
+	const tabId = useSignal<number | null>(null)
 
 	// Mount-once load; signals are stable refs, so no deps.
 	useEffect(() => {
 		send({ type: 'GET_STATE' })
 			.then((r) => {
 				initial.value = r
-				if (r.kind === 'state') state.value = r.state
+				if (r.kind === 'state') {
+					state.value = newest(state.value, r.state)
+					tabId.value = r.tabId
+				}
 			})
 			// `send` already handles its own failures, but a throw here would leave the
 			// popup stuck on the loading dots forever with nothing logged.
@@ -91,10 +106,28 @@ function App() {
 			.finally(() => (loading.value = false))
 	}, [])
 
+	// Keep the engine status live while the popup is open. A change only replies
+	// with the status from before the page applied it — the page answers later — so
+	// "click the page to start" would otherwise never show until the popup reopened.
+	// The content script already sends its tab's status to the extension with every
+	// change, for the toolbar badge; listen in on the same message.
+	useEffect(() => {
+		const onMessage = (msg: unknown, sender: { tab?: { id?: number } }) => {
+			const badge = msg as BadgeMessage | undefined
+			if (badge?.type !== 'MODULATE_BADGE') return
+			if (sender.tab?.id == null || sender.tab.id !== tabId.value) return
+			const current = state.value
+			if (!current || badge.audioSeq < current.audioSeq) return
+			state.value = { ...current, audio: badge.status, audioSeq: badge.audioSeq }
+		}
+		browser.runtime.onMessage.addListener(onMessage)
+		return () => browser.runtime.onMessage.removeListener(onMessage)
+	}, [])
+
 	async function dispatch(msg: PopupMessage) {
 		const r = await send(msg)
 		if (r.kind === 'state') {
-			state.value = r.state
+			state.value = newest(state.value, r.state)
 			error.value = null
 			return
 		}
