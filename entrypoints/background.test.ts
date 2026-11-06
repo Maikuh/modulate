@@ -50,7 +50,7 @@ async function sendBadge(msg: BadgeMessage, tabId: number | null = 7) {
 	const sender = (tabId === null ? {} : { tab: { id: tabId } }) as Parameters<
 		typeof fakeBrowser.runtime.onMessage.trigger
 	>[1]
-	await fakeBrowser.runtime.onMessage.trigger(msg, sender)
+	await fakeBrowser.runtime.onMessage.trigger(msg, sender, () => {})
 }
 
 const badgeText = () => action.setBadgeText.mock.calls.at(-1)?.[0]?.text
@@ -150,9 +150,11 @@ describe('background — toolbar icon', () => {
 
 describe('background — message guards', () => {
 	it('ignores a message that is not a badge update', async () => {
-		await fakeBrowser.runtime.onMessage.trigger({ type: 'SOMETHING_ELSE' }, {
-			tab: { id: 7 },
-		} as never)
+		await fakeBrowser.runtime.onMessage.trigger(
+			{ type: 'SOMETHING_ELSE' },
+			{ tab: { id: 7 } } as never,
+			() => {},
+		)
 		expect(action.setBadgeText).not.toHaveBeenCalled()
 	})
 

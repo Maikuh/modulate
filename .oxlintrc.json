@@ -11,7 +11,8 @@
 		"es2024": true
 	},
 	"rules": {
-		"react-hooks/exhaustive-deps": "off"
+		"react-hooks/exhaustive-deps": "off",
+		"react/immutability": "off"
 	},
 	"overrides": [
 		{

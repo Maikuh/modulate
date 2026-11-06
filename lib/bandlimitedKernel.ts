@@ -64,7 +64,7 @@ function weight(u: number): number {
 	const f = Math.abs(u) * RESOLUTION
 	const i = Math.floor(f)
 	if (i >= ZERO_CROSSINGS * RESOLUTION) return 0
-	return TABLE[i] + (TABLE[i + 1] - TABLE[i]) * (f - i)
+	return TABLE[i]! + (TABLE[i + 1]! - TABLE[i]!) * (f - i)
 }
 
 export interface BandlimitedState {
@@ -111,7 +111,7 @@ function kernel(
 	for (let k = first; k <= last; k++) {
 		const w = weight((position - k) * cutoff)
 		if (w === 0) continue
-		const x = k < 0 ? prev : k >= numFrames ? src[lastFrame] : src[srcOffset + 2 * k + channel]
+		const x = k < 0 ? prev : k >= numFrames ? src[lastFrame]! : src[srcOffset + 2 * k + channel]!
 		sum += x * w
 		norm += w
 	}

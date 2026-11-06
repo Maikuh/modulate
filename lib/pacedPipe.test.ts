@@ -45,7 +45,7 @@ function drive(pipe: Pipe, pitchAt: (seconds: number) => number, seconds: number
 		const o = new Float32Array(k * 2)
 		pipe.outputBuffer.extract(o, 0, k)
 		pipe.outputBuffer.receive(k)
-		for (let i = 0; i < k; i++) out.push(o[2 * i])
+		for (let i = 0; i < k; i++) out.push(o[2 * i]!)
 	}
 	return { out, produced, played }
 }
@@ -58,7 +58,7 @@ const stock = () =>
 function frequency(signal: number[]): number {
 	const tail = signal.slice(SR)
 	let crossings = 0
-	for (let i = 1; i < tail.length; i++) if (tail[i - 1] < 0 && tail[i] >= 0) crossings++
+	for (let i = 1; i < tail.length; i++) if (tail[i - 1]! < 0 && tail[i]! >= 0) crossings++
 	return (crossings * SR) / tail.length
 }
 

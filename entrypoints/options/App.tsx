@@ -101,7 +101,7 @@ function App() {
 		})
 	}
 
-	const videoIds = Object.keys(videos.value)
+	const videoEntries = Object.entries(videos.value)
 
 	return (
 		<div className="options">
@@ -227,12 +227,12 @@ function App() {
 					<div>
 						<h2 className="o-section__title">Saved Videos</h2>
 						<p className="o-section__desc">
-							Per-video pitch and tempo{videoIds.length > 0 ? ` · ${videoIds.length}` : ''}.
+							Per-video pitch and tempo{videoEntries.length > 0 ? ` · ${videoEntries.length}` : ''}.
 						</p>
 					</div>
 				</div>
 				<div className="card">
-					{videoIds.length === 0 ? (
+					{videoEntries.length === 0 ? (
 						<div className="o-empty">
 							<FilmIcon className="o-empty__icon" />
 							<p>No saved videos yet. Tune any YouTube video and it will appear here.</p>
@@ -240,8 +240,7 @@ function App() {
 					) : (
 						<>
 							<div className="vlist">
-								{videoIds.map((id) => {
-									const s = videos.value[id]
+								{videoEntries.map(([id, s]) => {
 									const label = s.title ?? id
 									return (
 										<div className="vrow" key={id}>

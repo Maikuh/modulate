@@ -34,7 +34,7 @@ function transpose(strategy: string, rate: number, chunk: number, seconds = 0.5)
 		const o = new Float32Array(k * 2)
 		ob.extract(o, 0, k)
 		ob.receive(k)
-		for (let i = 0; i < k; i++) out.push(o[2 * i])
+		for (let i = 0; i < k; i++) out.push(o[2 * i]!)
 	}
 	return out
 }
@@ -66,8 +66,8 @@ function audibleSnr(out: number[], rate: number): number {
 		let want = 0
 		for (let i = 0; i < taps; i++) {
 			const jj = j - (taps - 1) / 2 + i
-			got += h[i] * out[jj]
-			want += h[i] * ideal[jj]
+			got += h[i]! * out[jj]!
+			want += h[i]! * ideal[jj]!
 		}
 		signal += want * want
 		error += (got - want) ** 2

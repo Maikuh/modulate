@@ -374,7 +374,7 @@ describe('AudioEngine — graph lifecycle', () => {
 		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
 
 		expect(FakeAudioContext.created).toHaveLength(2)
-		expect(FakeAudioContext.created[0].closeCalls).toBe(1)
+		expect(FakeAudioContext.created[0]!.closeCalls).toBe(1)
 		expect(FakeAudioContext.live).toBe(1)
 	})
 

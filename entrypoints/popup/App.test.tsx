@@ -69,7 +69,7 @@ describe('popup App', () => {
 		await view.findByText('Pitch')
 		sendMessage.mockClear()
 		await userEvent.click(view.getByRole('button', { name: 'Increase Pitch' }))
-		expect(sendMessage.mock.calls[0][1] as PopupMessage).toEqual({
+		expect(sendMessage.mock.calls[0]![1] as PopupMessage).toEqual({
 			type: 'NUDGE_SEMITONES',
 			delta: 1,
 		})
@@ -81,7 +81,7 @@ describe('popup App', () => {
 		await view.findByText('Pitch')
 		sendMessage.mockClear()
 		await userEvent.click(view.getByLabelText('Master switch'))
-		expect(sendMessage.mock.calls[0][1] as PopupMessage).toEqual({
+		expect(sendMessage.mock.calls[0]![1] as PopupMessage).toEqual({
 			type: 'SET_GLOBAL_ENABLED',
 			enabled: false,
 		})
@@ -94,7 +94,7 @@ describe('popup App', () => {
 		sendMessage.mockClear()
 		await userEvent.click(view.getByRole('button', { name: /reset/i }))
 		await waitFor(() => expect(sendMessage).toHaveBeenCalled())
-		expect(sendMessage.mock.calls[0][1] as PopupMessage).toEqual({ type: 'RESET' })
+		expect(sendMessage.mock.calls[0]![1] as PopupMessage).toEqual({ type: 'RESET' })
 	})
 
 	// A YouTube tab opened before an install or update has no content script. Telling
