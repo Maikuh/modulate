@@ -2,19 +2,11 @@ import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { storage } from 'wxt/utils/storage'
 
-import {
-	DEFAULT_AUDIO_QUALITY,
-	MIN_OVERLAP_MS,
-	MAX_OVERLAP_MS,
-	type AudioQuality,
-} from '@/lib/audioQuality'
 import { formatSemitones } from '@/lib/format'
-import { Logo, PowerIcon, SlidersIcon, FilmIcon, TrashIcon } from '@/lib/icons'
+import { Logo, PowerIcon, FilmIcon, TrashIcon } from '@/lib/icons'
 import type { VideoSetting } from '@/lib/settings'
 import {
 	globalEnabled,
-	getAudioQuality,
-	setAudioQuality,
 	listVideoSettings,
 	removeVideoSetting,
 	clearVideoSettings,
@@ -23,18 +15,12 @@ import {
 
 function App() {
 	const global = useSignal(true)
-	const quality = useSignal<AudioQuality>({ ...DEFAULT_AUDIO_QUALITY })
 	const videos = useSignal<Record<string, VideoSetting>>({})
 	const error = useSignal<string | null>(null)
 
 	async function refresh() {
-		const [g, q, v] = await Promise.all([
-			globalEnabled.getValue(),
-			getAudioQuality(),
-			listVideoSettings(),
-		])
+		const [g, v] = await Promise.all([globalEnabled.getValue(), listVideoSettings()])
 		global.value = g
-		quality.value = q
 		videos.value = v
 	}
 
@@ -44,11 +30,10 @@ function App() {
 	useEffect(() => {
 		void reload('initial load')
 		// One re-read per change rather than per-item watchers writing individual
-		// signals: this page is edited rarely, three extra storage reads cost nothing,
-		// and a single path means the displayed state always comes from storage.
-		const keys = ['local:globalEnabled', 'local:audioQuality'] as const
+		// signals: this page is edited rarely, extra storage reads cost nothing, and a
+		// single path means the displayed state always comes from storage.
 		const unwatchers = [
-			...keys.map((key) => storage.watch(key, () => void reload(`${key} changed`))),
+			storage.watch('local:globalEnabled', () => void reload('globalEnabled changed')),
 			watchVideoSettings(() => void reload('video settings changed')),
 		]
 		return () => unwatchers.forEach((off) => off())
@@ -73,9 +58,9 @@ function App() {
 
 	/**
 	 * Apply an optimistic signal update, then persist. On failure roll the signal
-	 * back from storage — leaving it would show the user a switch position or a
-	 * quality value that storage never accepted, which the content scripts then
-	 * contradict at playback time.
+	 * back from storage — leaving it would show the user a switch position that
+	 * storage never accepted, which the content scripts then contradict at playback
+	 * time.
 	 */
 	async function persist(work: () => Promise<void>): Promise<void> {
 		try {
@@ -94,14 +79,6 @@ function App() {
 		void persist(async () => {
 			global.value = value
 			await globalEnabled.setValue(value)
-		})
-	}
-
-	function patchQuality(partial: Partial<AudioQuality>) {
-		void persist(async () => {
-			// Optimistic, then replaced by what storage actually accepted (normalized).
-			quality.value = { ...quality.value, ...partial }
-			quality.value = await setAudioQuality(partial)
 		})
 	}
 
@@ -155,70 +132,6 @@ function App() {
 								<span className="toggle__thumb" />
 							</span>
 						</label>
-					</div>
-				</div>
-			</section>
-
-			<section className="o-section">
-				<div className="o-section__head">
-					<span className="o-section__icon">
-						<SlidersIcon />
-					</span>
-					<div>
-						<h2 className="o-section__title">Audio Quality</h2>
-						<p className="o-section__desc">
-							WSOLA time-stretch tuning. Higher overlap reduces artifacts at extreme shifts but
-							costs CPU. Window timing is auto-calculated.
-						</p>
-					</div>
-				</div>
-				<div className="card">
-					<div className="row">
-						<div className="row__text">
-							<span className="row__label">Overlap (ms)</span>
-							<span className="row__desc">Crossfade between processing windows.</span>
-						</div>
-						<div className="quality-control">
-							<input
-								type="range"
-								className="slider"
-								aria-label="Overlap (ms)"
-								min={MIN_OVERLAP_MS}
-								max={MAX_OVERLAP_MS}
-								step={1}
-								value={quality.value.overlapMs}
-								onChange={(e) => patchQuality({ overlapMs: Number(e.currentTarget.value) })}
-							/>
-							<span className="quality-value">{quality.value.overlapMs}</span>
-						</div>
-					</div>
-
-					<div className="row">
-						<div className="row__text">
-							<span className="row__label">Quick seek</span>
-							<span className="row__desc">Faster processing, slightly more artifacts.</span>
-						</div>
-						<label className="toggle">
-							<input
-								type="checkbox"
-								aria-label="Quick seek"
-								checked={quality.value.quickSeek}
-								onChange={(e) => patchQuality({ quickSeek: e.currentTarget.checked })}
-							/>
-							<span className="toggle__track">
-								<span className="toggle__thumb" />
-							</span>
-						</label>
-					</div>
-
-					<div className="row">
-						<div className="row__text">
-							<span className="row__label">Restore defaults</span>
-							<span className="row__desc">Reset every quality knob to its recommended value.</span>
-						</div>
-						<button className="btn" onClick={() => patchQuality({ ...DEFAULT_AUDIO_QUALITY })}>
-							Restore
-						</button>
 					</div>
 				</div>
 			</section>

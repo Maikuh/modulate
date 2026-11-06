@@ -6,10 +6,8 @@
       "name": "wxt-react-starter",
       "dependencies": {
         "@preact/signals": "^2.11.4",
-        "@soundtouchjs/audio-worklet": "^2.1.1",
-        "@soundtouchjs/core": "^2.1.1",
-        "@soundtouchjs/worklet-base": "^2.1.1",
         "preact": "^11.1.1",
+        "signalsmith-stretch": "1.3.2",
       },
       "devDependencies": {
         "@preact/preset-vite": "^2.10.6",
@@ -320,14 +318,6 @@
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.1", "", {}, "sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw=="],
 
     "@rollup/pluginutils": ["@rollup/pluginutils@5.5.1", "", { "dependencies": { "@types/estree": "^1.0.0", "estree-walker": "^2.0.2", "picomatch": "^4.0.2" }, "peerDependencies": { "rollup": "^1.20.0||^2.0.0||^3.0.0||^4.0.0" }, "optionalPeers": ["rollup"] }, "sha512-P9ZvnfouRu4MSC+ilERaw6FmZs8zqKhpHxEs4aGDGWQAMzQGXnhvCSvoNwokfNvdt7t3Y5Y4p6gStQgezeIqug=="],
-
-    "@soundtouchjs/audio-worklet": ["@soundtouchjs/audio-worklet@2.1.1", "", { "dependencies": { "@soundtouchjs/core": "2.1.1", "@soundtouchjs/interpolation-strategy-lanczos": "2.1.1", "@soundtouchjs/worklet-base": "2.1.1" } }, "sha512-itxSW62gbtDKoFo6eEr4PXzVz3oF+wCVREupFi5JiUR31tWWwCizr+2XezYD1SnkrSDfdmZvvviTtoyejYeD0Q=="],
-
-    "@soundtouchjs/core": ["@soundtouchjs/core@2.1.1", "", { "dependencies": { "@soundtouchjs/interpolation-strategy-lanczos": "2.1.1" } }, "sha512-ccBiG9/zHdM1Sx1RUkXWBgRYFI1HCiUHHwRK8gAvVNgmcafBgUzRP6Czn7pUPcHgSQus+i3Eu3DlfBR24wqspA=="],
-
-    "@soundtouchjs/interpolation-strategy-lanczos": ["@soundtouchjs/interpolation-strategy-lanczos@2.1.1", "", {}, "sha512-EX4qVLnOJ9pKfL7iSPJSJDKDAoZ4d7JO7KTKMPVo2XIhlmT/2hTZC5dWL/R9Jv3XC7kyQeteeGcogWP6DPi47A=="],
-
-    "@soundtouchjs/worklet-base": ["@soundtouchjs/worklet-base@2.1.1", "", { "dependencies": { "@soundtouchjs/core": "2.1.1" } }, "sha512-H/QMyW8yB91WX1CVSVCeOXNPdv1m71Zi0KQlvcX3f+159GNUo8kckmXV0cHpni9SCqVhCHMS/lapbBKl4tc6nQ=="],
 
     "@testing-library/dom": ["@testing-library/dom@10.4.2", "", { "dependencies": { "@babel/code-frame": "^7.10.4", "@babel/runtime": "^7.12.5", "@types/aria-query": "^5.0.1", "aria-query": "5.3.0", "dom-accessibility-api": "^0.5.9", "lz-string": "^1.5.0", "picocolors": "1.1.1", "pretty-format": "^27.0.2" } }, "sha512-yzr2S9HyAIdhz2/6qHgbs665Q7PKVcDF05vsOlHPxG1mo36gKVesdYVeDLnXgfjJ03CrKRk08knc6+E/9m8v2Q=="],
 
@@ -1010,6 +1000,8 @@
     "shebang-regex": ["shebang-regex@3.0.0", "", {}, "sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A=="],
 
     "shell-quote": ["shell-quote@1.11.0", "", {}, "sha512-JdxDPD0DBTyu08pq0kPC0xSNet/qsU07qT6IsX1AS8oO2ICNRY4ldNa8OAI6PuwAH8tG3lxEhbqmyp4Dw4036g=="],
+
+    "signalsmith-stretch": ["signalsmith-stretch@1.3.2", "", {}, "sha512-tJqRbwPCoWLSHXwO29UQ75u72IwPsHns3RG+TKzuOAp7OduJiJMzEtz32JEFbPFQcTR7aiKCIVc+/Kzw8bMZUw=="],
 
     "simple-code-frame": ["simple-code-frame@1.3.0", "", { "dependencies": { "kolorist": "^1.6.0" } }, "sha512-MB4pQmETUBlNs62BBeRjIFGeuy/x6gGKh7+eRUemn1rCFhqo7K+4slPqsyizCbcbYLnaYqaoZ2FWsZ/jN06D8w=="],
 

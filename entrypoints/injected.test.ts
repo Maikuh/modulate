@@ -14,7 +14,6 @@ vi.mock('@/lib/audioEngine', () => ({
 		attach: vi.fn(),
 		captures: vi.fn(),
 		ensureGraph: vi.fn().mockResolvedValue(undefined),
-		applyQuality: vi.fn(),
 		apply: vi.fn(),
 		resume: vi.fn().mockResolvedValue(undefined),
 		dispose: vi.fn().mockResolvedValue(undefined),
@@ -39,7 +38,7 @@ function audioAllowed(allowed: boolean): void {
 		engine.hasElement = true
 	})
 }
-const PROCESSOR_URL = 'chrome-extension://abc123/soundtouch-processor.js'
+const PROCESSOR_URL = 'chrome-extension://abc123/signalsmith-processor.js'
 
 function message(overrides: Partial<ApplyMessage> = {}): ApplyMessage {
 	return {
@@ -48,8 +47,6 @@ function message(overrides: Partial<ApplyMessage> = {}): ApplyMessage {
 		processorUrl: PROCESSOR_URL,
 		semitones: 0,
 		tempo: 1,
-		overlapMs: 12,
-		quickSeek: true,
 		...overrides,
 	}
 }
@@ -181,8 +178,6 @@ describe('injected script — payload validation', () => {
 	it('rejects non-finite and non-numeric parameters', async () => {
 		await post(message({ semitones: '3' as unknown as number }))
 		await post(message({ semitones: 3, tempo: Number.NaN }))
-		await post(message({ semitones: 3, overlapMs: null as unknown as number }))
-		await post(message({ semitones: 3, quickSeek: 'yes' as unknown as boolean }))
 		expect(engine.ensureGraph).not.toHaveBeenCalled()
 	})
 })

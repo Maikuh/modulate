@@ -1,16 +1,9 @@
-import { render, within, waitFor, fireEvent } from '@testing-library/preact'
+import { render, within, waitFor } from '@testing-library/preact'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 
-import { DEFAULT_AUDIO_QUALITY } from '@/lib/audioQuality'
-import {
-	globalEnabled,
-	getAudioQuality,
-	setAudioQuality,
-	setVideoSetting,
-	listVideoSettings,
-} from '@/lib/storage'
+import { globalEnabled, setVideoSetting, listVideoSettings } from '@/lib/storage'
 
 import App from './App'
 
@@ -20,15 +13,14 @@ beforeEach(() => {
 	vi.spyOn(browser.runtime, 'getManifest').mockReturnValue({ version: '0.0.0' } as any)
 })
 
-// Scope queries to this render's container. Both toggles carry an `aria-label`,
-// so address them by name rather than by position — an index would silently
-// retarget to the wrong control the moment a checkbox is added above them.
+// Scope queries to this render's container. Address the switch by name rather
+// than by position — an index would silently retarget to the wrong control the
+// moment a checkbox is added above it.
 function renderApp() {
 	const view = within(render(<App />).container as HTMLElement)
 	return {
 		view,
 		globalSwitch: () => view.getByLabelText('Enable Modulate'),
-		quickSeekSwitch: () => view.getByLabelText('Quick seek'),
 	}
 }
 
@@ -46,40 +38,17 @@ describe('options App', () => {
 		await waitFor(async () => expect(await globalEnabled.getValue()).toBe(false))
 	})
 
-	it('persists a quality knob edit', async () => {
-		const { quickSeekSwitch } = renderApp()
-		await waitFor(() => expect(quickSeekSwitch()).toBeChecked())
-		await userEvent.click(quickSeekSwitch())
-		await waitFor(async () => expect((await getAudioQuality()).quickSeek).toBe(false))
-	})
-
-	it('persists an overlap slider edit', async () => {
-		const { view } = renderApp()
-		const slider = view.getByLabelText('Overlap (ms)')
-		await waitFor(() => expect(slider).toHaveValue(String(DEFAULT_AUDIO_QUALITY.overlapMs)))
-		fireEvent.change(slider, { target: { value: '30' } })
-		await waitFor(async () => expect((await getAudioQuality()).overlapMs).toBe(30))
-	})
-
-	// The readout must show what the DSP actually runs, not a legacy 0 it ignores.
-	it('shows a legacy out-of-range overlap as the normalized value', async () => {
-		await fakeBrowser.storage.local.set({ audioQuality: { overlapMs: 0, quickSeek: true } })
-		const { view } = renderApp()
-		await waitFor(() => expect(view.getByLabelText('Overlap (ms)')).toHaveValue('1'))
-		expect(view.getByText('1', { selector: '.quality-value' })).toBeInTheDocument()
-	})
-
 	it('rolls a failed write back to the stored value and says so', async () => {
-		const { view, quickSeekSwitch } = renderApp()
-		await waitFor(() => expect(quickSeekSwitch()).toBeChecked())
+		const { view, globalSwitch } = renderApp()
+		await waitFor(() => expect(globalSwitch()).toBeChecked())
 		vi.spyOn(fakeBrowser.storage.local, 'set').mockRejectedValueOnce(new Error('quota'))
 		vi.spyOn(console, 'error').mockImplementation(() => {})
 
-		await userEvent.click(quickSeekSwitch())
+		await userEvent.click(globalSwitch())
 
 		expect(await view.findByRole('alert')).toHaveTextContent(/could not save/i)
-		await waitFor(() => expect(quickSeekSwitch()).toBeChecked())
-		expect((await getAudioQuality()).quickSeek).toBe(true)
+		await waitFor(() => expect(globalSwitch()).toBeChecked())
+		expect(await globalEnabled.getValue()).toBe(true)
 	})
 
 	it('shows the empty state when no videos are saved', async () => {
@@ -125,13 +94,5 @@ describe('options App', () => {
 		await userEvent.click(view.getByRole('button', { name: /clear all/i }))
 		await waitFor(() => expect(view.queryByText('a')).not.toBeInTheDocument())
 		expect(await listVideoSettings()).toEqual({})
-	})
-
-	it('restores quality defaults', async () => {
-		await setAudioQuality({ quickSeek: false })
-		const { view, quickSeekSwitch } = renderApp()
-		await waitFor(() => expect(quickSeekSwitch()).not.toBeChecked())
-		await userEvent.click(view.getByRole('button', { name: /restore/i }))
-		await waitFor(async () => expect(await getAudioQuality()).toEqual(DEFAULT_AUDIO_QUALITY))
 	})
 })

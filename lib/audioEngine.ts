@@ -1,9 +1,7 @@
-import { SoundTouchNode } from '@soundtouchjs/audio-worklet'
-
 // Side-effect-free modules — safe to pull into the MAIN-world bundle, unlike
 // `storage.ts` which touches extension APIs unavailable in the page realm.
-import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality'
 import type { ResolvedSetting } from '@/lib/settings'
+import { createStretchNode, type StretchNode } from '@/lib/stretchNode'
 
 /**
  * Owns the Web Audio graph that pitch-shifts and time-stretches a single media
@@ -37,9 +35,9 @@ import type { ResolvedSetting } from '@/lib/settings'
  *    holds pitch natively (Firefox runs SoundTouch internally, Chrome WSOLA). No
  *    graph, no capture, no click in the page needed — and nothing of ours to fail.
  *  - With a transpose, the worklet is in the path anyway, so the element resamples
- *    raw (`preservesPitch = false`, pitch drops like a record) and the rate is
- *    mirrored to the SoundTouch `playbackRate` AudioParam, which compensates it in
- *    the same pass as the transpose (`pitchSemitones`). One stretch, not two.
+ *    raw (`preservesPitch = false`, pitch drops like a record) and the worklet's
+ *    shift undoes that in the same pass as the transpose (`stretchSemitones`).
+ *    One stretch, not two.
  *
  * On YouTube the same `<video>` element persists across SPA navigations, so a
  * single graph built once serves every video; only the parameters change.
@@ -67,7 +65,7 @@ export class AudioBlockedError extends Error {
 class AudioEngine {
 	private ctx: AudioContext | null = null
 	private source: MediaElementAudioSourceNode | null = null
-	private node: SoundTouchNode | null = null
+	private node: StretchNode | null = null
 	/** The element the graph captured; `null` while there is no graph. */
 	private graphElement: HTMLMediaElement | null = null
 	/**
@@ -92,7 +90,6 @@ class AudioEngine {
 	private failed = false
 	private semitones = 0
 	private tempo = 1
-	private quality: AudioQuality = { ...DEFAULT_AUDIO_QUALITY }
 	/**
 	 * Whether we are the ones currently driving `element.playbackRate`. YouTube's
 	 * own speed menu writes the same property, so "off" may only reset the rate to
@@ -105,8 +102,8 @@ class AudioEngine {
 	 * The graph is bypassed (source wired straight to speakers) whenever there is
 	 * no transpose: tempo alone is the browser's native time-stretch, so the worklet
 	 * has nothing to do. Bypassing matters because `createMediaElementSource` is
-	 * one-shot, so without it every video runs through continuous WSOLA processing
-	 * even when untouched — needless CPU. A crashed worklet is bypassed too, since
+	 * one-shot, so without it every video runs through continuous phase-vocoder
+	 * processing even when untouched — needless CPU. A crashed worklet is bypassed too, since
 	 * routing through it is silence; tempo still works there, natively.
 	 */
 	private get bypassed(): boolean {
@@ -168,9 +165,7 @@ class AudioEngine {
 		}
 
 		// 'playback' over the default 'interactive': a larger output buffer gives the
-		// SoundTouch WSOLA pipeline more slack to fill each render quantum. At the tiny
-		// interactive buffer the worklet sometimes can't produce a full block in time,
-		// zero-fills the gap, and that gap is the audible click while transposing. We
+		// worklet more slack before a late render quantum becomes an audible gap. We
 		// don't need low latency — this is offline-style playback, not live monitoring.
 		const ctx = new AudioContext({ latencyHint: 'playback' })
 		// Adopt the context BEFORE anything that can throw. `register` fetches the
@@ -180,7 +175,7 @@ class AudioEngine {
 		// the URL poll, three storage watchers), leaking one per attempt would burn
 		// through the cap in seconds and take audio down for the rest of the page.
 		this.ctx = ctx
-		let node: SoundTouchNode
+		let node: StretchNode
 		let source: MediaElementAudioSourceNode
 		try {
 			// Ask the autoplay policy before anything irreversible. A context that won't
@@ -192,15 +187,7 @@ class AudioEngine {
 			await this.resume(START_TIMEOUT_MS)
 			if (ctx.state !== 'running') throw new AudioBlockedError()
 
-			await SoundTouchNode.register(ctx, processorUrl)
-
-			node = new SoundTouchNode({ context: ctx })
-			// Apply the user-tunable WSOLA timing. `quickSeek: false` runs the full
-			// cross-correlation search per overlap-add splice instead of the fast
-			// approximation; a wider `overlapMs` lengthens the crossfade between splices,
-			// hiding discontinuities. Tradeoff is CPU and a touch more smearing — exposed
-			// in the options page so users can trade artifacts against CPU.
-			node.setStretchParameters(this.quality)
+			node = await createStretchNode(ctx, processorUrl)
 			source = ctx.createMediaElementSource(el)
 		} catch (err) {
 			await this.disposeGraph()
@@ -217,14 +204,14 @@ class AudioEngine {
 		this.source = source
 		this.graphElement = el
 		this.attach(el)
-		// The worklet pipeline trails its input by ~80–175 ms (`lib/pipeline.test.ts`)
-		// and the video isn't delayed to match; this is the context's share on top of
-		// that, which only the browser knows.
+		// The worklet trails its input by ~140–150 ms (`lib/stretchNode.test.ts`) and
+		// the video isn't delayed to match; this is the context's share on top of that,
+		// which only the browser knows.
 		console.debug('[modulate] audio graph built; context latency (s)', {
 			base: ctx.baseLatency,
 			output: ctx.outputLatency,
 		})
-		node.addEventListener('processorerror', (event) => {
+		node.input.addEventListener('processorerror', (event) => {
 			if (this.node !== node) return
 			console.error('[modulate] audio worklet crashed; bypassing it', event)
 			this.failed = true
@@ -235,7 +222,7 @@ class AudioEngine {
 
 	/**
 	 * Wire the source either straight to the speakers (bypass) or through the
-	 * SoundTouch worklet. Either branch always reaches `destination`, so the
+	 * stretch worklet. Either branch always reaches `destination`, so the
 	 * element never goes silent (the "never fully disconnect" rule). Reconnecting
 	 * causes a small audible seam, so callers only re-route when crossing the
 	 * bypass boundary.
@@ -243,7 +230,8 @@ class AudioEngine {
 	private route(): void {
 		if (!this.ctx || !this.source || !this.node) return
 		this.source.disconnect()
-		this.node.disconnect()
+		this.node.output.disconnect()
+		this.node.setActive(!this.bypassed)
 		try {
 			if (this.bypassed) {
 				// Tempo goes native (pitch preserved by the element); the worklet's params
@@ -252,13 +240,13 @@ class AudioEngine {
 				this.source.connect(this.ctx.destination)
 			} else {
 				this.applyLive()
-				this.source.connect(this.node)
-				this.node.connect(this.ctx.destination)
+				this.source.connect(this.node.input)
+				this.node.output.connect(this.ctx.destination)
 			}
 		} catch (err) {
 			// Never leave the source stranded between the disconnect above and a
-			// connect. `applyLive` writes restricted floats (`AudioParam.value`,
-			// `element.playbackRate`) that throw on a value the clamps didn't catch —
+			// connect. `applyLive` writes `element.playbackRate`, a restricted float that
+			// throws on a value the clamps didn't catch —
 			// and a captured element can no longer fall back to direct output, so a
 			// throw here would mute the video permanently with no recovery short of a
 			// reload. Fall back to the bypass wiring, then rethrow.
@@ -270,6 +258,7 @@ class AudioEngine {
 			this.semitones = 0
 			this.tempo = 1
 			this.releaseRate()
+			this.node.setActive(false)
 			this.source.disconnect()
 			this.source.connect(this.ctx.destination)
 			throw err
@@ -282,13 +271,12 @@ class AudioEngine {
 			this.applyNativeRate()
 			return
 		}
-		this.node.pitchSemitones.value = this.semitones
-		this.node.playbackRate.value = this.tempo
+		this.node.set(this.semitones, this.tempo)
 		if (!this.element) return
 
 		if (this.tempo === 1) {
 			// No time-stretch asked for, so hand the rate back to the page: the worklet
-			// is compensating nothing (its `playbackRate` param is 1), and forcing
+			// is compensating nothing (the shift is the transpose alone), and forcing
 			// `preservesPitch = false` here would make any speed the viewer picks in
 			// YouTube's own menu resample raw — pitch rising with speed, uncorrected,
 			// on top of whatever transpose is active. Pitch shift alone must leave the
@@ -385,12 +373,6 @@ class AudioEngine {
 		else this.applyLive()
 	}
 
-	/** Update the WSOLA tuning, live if the graph already exists. */
-	applyQuality(quality: AudioQuality): void {
-		this.quality = quality
-		this.node?.setStretchParameters(quality)
-	}
-
 	/**
 	 * Try to start the context; harmless if already running. Bounded: a context the
 	 * autoplay policy won't start leaves `resume()` pending — per spec it neither
@@ -427,7 +409,7 @@ class AudioEngine {
 	 * does not release the captured element.
 	 */
 	private async disposeGraph(): Promise<void> {
-		this.node?.disconnect()
+		this.node?.output.disconnect()
 		this.source?.disconnect()
 		const ctx = this.ctx
 		this.ctx = null

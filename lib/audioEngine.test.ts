@@ -9,10 +9,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
  * context cap when they regress, and none of them are observable any other way
  * short of loading the extension onto a real page.
  */
-class FakeAudioParam {
-	value = 0
-}
-
 class FakeNode extends EventTarget {
 	readonly outputs = new Set<FakeNode>()
 
@@ -37,18 +33,33 @@ class FakeNode extends EventTarget {
 	}
 }
 
-class FakeSoundTouchNode extends FakeNode {
-	static register = vi.fn<(ctx: unknown, url: string) => Promise<void>>()
-	/** The worklet built for each context, so tests can reach it. */
-	static byContext = new WeakMap<FakeAudioContext, FakeSoundTouchNode>()
+/**
+ * The stretch node `createStretchNode` hands back for each context: the worklet
+ * (`input`) wired permanently to its output stage (`output`), as the real one is.
+ */
+class FakeStretch {
+	/** Stands in for the worklet module load; tests make it fail or block. */
+	static load = vi.fn<(ctx: unknown, url: string) => Promise<void>>()
+	/** The node built for each context, so tests can reach it. */
+	static byContext = new WeakMap<FakeAudioContext, FakeStretch>()
 
-	pitchSemitones = new FakeAudioParam()
-	playbackRate = new FakeAudioParam()
-	setStretchParameters = vi.fn()
+	readonly input = new FakeNode()
+	readonly output = new FakeNode()
+	/** What the engine last asked the worklet for. */
+	semitones = 0
+	tempo = 1
+	active = false
+	set = vi.fn((semitones: number, tempo: number) => {
+		this.semitones = semitones
+		this.tempo = tempo
+	})
+	setActive = vi.fn((active: boolean) => {
+		this.active = active
+	})
 
-	constructor(opts: { context: FakeAudioContext }) {
-		super()
-		FakeSoundTouchNode.byContext.set(opts.context, this)
+	constructor(ctx: FakeAudioContext) {
+		this.input.connect(this.output)
+		FakeStretch.byContext.set(ctx, this)
 	}
 }
 
@@ -104,9 +115,14 @@ class FakeAudioContext {
 	}
 }
 
-vi.mock('@soundtouchjs/audio-worklet', () => ({ SoundTouchNode: FakeSoundTouchNode }))
+vi.mock('@/lib/stretchNode', () => ({
+	createStretchNode: async (ctx: FakeAudioContext, url: string) => {
+		await FakeStretch.load(ctx, url)
+		return new FakeStretch(ctx)
+	},
+}))
 
-const PROCESSOR_URL = 'chrome-extension://abc/soundtouch-processor.js'
+const PROCESSOR_URL = 'chrome-extension://abc/signalsmith-processor.js'
 
 /** The engine is a module singleton, so each test needs a fresh module graph. */
 async function freshEngine() {
@@ -138,16 +154,16 @@ function currentSource(): FakeNode {
 	return source
 }
 
-function currentWorklet(): FakeSoundTouchNode {
-	const node = FakeSoundTouchNode.byContext.get(currentCtx())
+function currentWorklet(): FakeStretch {
+	const node = FakeStretch.byContext.get(currentCtx())
 	if (!node) throw new Error('no worklet built for this context')
 	return node
 }
 
 beforeEach(() => {
 	FakeAudioContext.reset()
-	FakeSoundTouchNode.register = vi.fn<(ctx: unknown, url: string) => Promise<void>>()
-	FakeSoundTouchNode.register.mockResolvedValue(undefined)
+	FakeStretch.load = vi.fn<(ctx: unknown, url: string) => Promise<void>>()
+	FakeStretch.load.mockResolvedValue(undefined)
 	vi.stubGlobal('AudioContext', FakeAudioContext)
 	document.body.innerHTML = ''
 })
@@ -180,7 +196,7 @@ describe('AudioEngine — routing', () => {
 		expect(source.reaches(currentCtx().destination)).toBe(true)
 		// ...via the worklet, not straight past it.
 		expect(source.outputs.has(currentCtx().destination)).toBe(false)
-		expect(source.outputs.has(currentWorklet())).toBe(true)
+		expect(source.outputs.has(currentWorklet().input)).toBe(true)
 	})
 
 	it('still reaches destination after crossing the bypass boundary both ways', async () => {
@@ -244,7 +260,7 @@ describe('AudioEngine — routing', () => {
 		fail = false
 		engine.apply({ semitones: 3, tempo: 1.25 })
 
-		expect(currentSource().outputs.has(worklet)).toBe(true)
+		expect(currentSource().outputs.has(worklet.input)).toBe(true)
 		expect(el.preservesPitch).toBe(false)
 	})
 
@@ -256,8 +272,8 @@ describe('AudioEngine — routing', () => {
 		engine.apply({ semitones: 3, tempo: 1.5 })
 
 		expect(disconnect).toHaveBeenCalledOnce()
-		expect(currentWorklet().pitchSemitones.value).toBe(3)
-		expect(currentWorklet().playbackRate.value).toBe(1.5)
+		expect(currentWorklet().semitones).toBe(3)
+		expect(currentWorklet().tempo).toBe(1.5)
 	})
 
 	// A crashed worklet outputs silence forever. Routing around it keeps the video
@@ -270,7 +286,7 @@ describe('AudioEngine — routing', () => {
 		await engine.ensureGraph(el, PROCESSOR_URL)
 		engine.apply({ semitones: 4, tempo: 1.5 })
 
-		currentWorklet().dispatchEvent(new Event('processorerror'))
+		currentWorklet().input.dispatchEvent(new Event('processorerror'))
 
 		const { destination } = currentCtx()
 		expect(currentSource().outputs.has(destination)).toBe(true)
@@ -290,8 +306,8 @@ describe('AudioEngine — routing', () => {
 		engine.apply({ semitones: -3 })
 		engine.apply({ tempo: 0.75 })
 
-		expect(currentWorklet().pitchSemitones.value).toBe(-3)
-		expect(currentWorklet().playbackRate.value).toBe(0.75)
+		expect(currentWorklet().semitones).toBe(-3)
+		expect(currentWorklet().tempo).toBe(0.75)
 	})
 })
 
@@ -306,7 +322,7 @@ describe('AudioEngine — native tempo', () => {
 		engine.apply({ tempo: 1.5 })
 
 		expect(currentSource().outputs.has(currentCtx().destination)).toBe(true)
-		expect(currentSource().outputs.has(currentWorklet())).toBe(false)
+		expect(currentSource().outputs.has(currentWorklet().input)).toBe(false)
 		expect(el.preservesPitch).toBe(true)
 		expect(el.playbackRate).toBe(1.5)
 	})
@@ -346,7 +362,7 @@ describe('AudioEngine — native tempo', () => {
 		engine.attach(el)
 		engine.apply({ tempo: 1.5 })
 		const rates: number[] = []
-		FakeSoundTouchNode.register.mockImplementation(async () => {
+		FakeStretch.load.mockImplementation(async () => {
 			rates.push(el.playbackRate)
 		})
 
@@ -356,7 +372,7 @@ describe('AudioEngine — native tempo', () => {
 		expect(rates).toEqual([1.5])
 		expect(el.preservesPitch).toBe(false)
 		expect(el.playbackRate).toBe(1.5)
-		expect(currentWorklet().playbackRate.value).toBe(1.5)
+		expect(currentWorklet().tempo).toBe(1.5)
 	})
 
 	it('switches pitch preservation back on when the transpose is dropped', async () => {
@@ -468,7 +484,7 @@ describe('AudioEngine — graph lifecycle', () => {
 	// three storage watchers, so one leak per attempt exhausts the cap in seconds.
 	it('closes the context when the worklet module fails to load', async () => {
 		const engine = await freshEngine()
-		FakeSoundTouchNode.register.mockRejectedValue(new Error('404'))
+		FakeStretch.load.mockRejectedValue(new Error('404'))
 
 		await expect(engine.ensureGraph(makeVideo(), PROCESSOR_URL)).rejects.toThrow('404')
 
@@ -516,7 +532,7 @@ describe('AudioEngine — graph lifecycle', () => {
 
 	it('does not leak across repeated failed builds', async () => {
 		const engine = await freshEngine()
-		FakeSoundTouchNode.register.mockRejectedValue(new Error('404'))
+		FakeStretch.load.mockRejectedValue(new Error('404'))
 
 		for (let i = 0; i < 8; i++) {
 			await engine.ensureGraph(makeVideo(), PROCESSOR_URL).catch(() => {})
@@ -534,13 +550,13 @@ describe('AudioEngine — graph lifecycle', () => {
 		const second = makeVideo()
 
 		let release!: () => void
-		FakeSoundTouchNode.register
+		FakeStretch.load
 			.mockImplementationOnce(() => new Promise<void>((r) => (release = r)))
 			.mockResolvedValue(undefined)
 
 		const a = engine.ensureGraph(first, PROCESSOR_URL)
 		const b = engine.ensureGraph(second, PROCESSOR_URL)
-		// build() awaits dispose() before it reaches register(), so the blocking
+		// build() awaits dispose() before it reaches the module load, so the blocking
 		// promise does not exist yet at this point in the turn.
 		await new Promise((r) => setTimeout(r, 0))
 		release()
@@ -581,7 +597,7 @@ describe('AudioEngine — graph lifecycle', () => {
 
 		expect(FakeAudioContext.captured.has(el)).toBe(false)
 		expect(FakeAudioContext.live).toBe(0)
-		expect(FakeSoundTouchNode.register).not.toHaveBeenCalled()
+		expect(FakeStretch.load).not.toHaveBeenCalled()
 		expect(engine.hasGraph).toBe(false)
 
 		// After a gesture the same element is still capturable.
@@ -626,29 +642,45 @@ describe('AudioEngine — graph lifecycle', () => {
 	})
 })
 
-describe('AudioEngine — quality', () => {
-	it('applies the stored quality at build time', async () => {
+describe('AudioEngine — worklet activity', () => {
+	// An inactive Signalsmith worklet outputs silence, and an active one bypassed is
+	// wasted CPU: it runs exactly while it is in the path.
+	it('runs the worklet only while routed through it', async () => {
 		const engine = await freshEngine()
-		engine.applyQuality({ overlapMs: 30, quickSeek: false })
-
 		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+		const worklet = currentWorklet()
+		expect(worklet.active).toBe(false)
 
-		expect(currentWorklet().setStretchParameters).toHaveBeenCalledWith({
-			overlapMs: 30,
-			quickSeek: false,
-		})
+		engine.apply({ semitones: 3 })
+		expect(worklet.active).toBe(true)
+
+		engine.apply({ semitones: 0, tempo: 1.5 })
+		expect(worklet.active).toBe(false)
 	})
 
-	it('pushes a quality change into a live graph', async () => {
+	it('stops the worklet when a route falls back to the bypass', async () => {
+		const engine = await freshEngine()
+		const el = makeVideo()
+		await engine.ensureGraph(el, PROCESSOR_URL)
+		Object.defineProperty(el, 'playbackRate', {
+			set() {
+				throw new TypeError('rejected')
+			},
+			get: () => 1,
+			configurable: true,
+		})
+
+		expect(() => engine.apply({ semitones: 3, tempo: 1.5 })).toThrow(TypeError)
+
+		expect(currentWorklet().active).toBe(false)
+	})
+
+	it('hands the worklet the transpose and the tempo it compensates', async () => {
 		const engine = await freshEngine()
 		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
-		currentWorklet().setStretchParameters.mockClear()
 
-		engine.applyQuality({ overlapMs: 5, quickSeek: true })
+		engine.apply({ semitones: -4, tempo: 1.25 })
 
-		expect(currentWorklet().setStretchParameters).toHaveBeenCalledWith({
-			overlapMs: 5,
-			quickSeek: true,
-		})
+		expect(currentWorklet().set).toHaveBeenLastCalledWith(-4, 1.25)
 	})
 })

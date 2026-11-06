@@ -1,17 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-import { MAX_OVERLAP_MS } from '@/lib/audioQuality'
 import { parseApplyMessage, type ApplyMessage } from '@/lib/messaging'
 import { MAX_SEMITONES, MAX_TEMPO, MIN_TEMPO } from '@/lib/settings'
 
 const valid: ApplyMessage = {
 	source: 'modulate',
 	type: 'apply',
-	processorUrl: 'moz-extension://abc/soundtouch-processor.js',
+	processorUrl: 'moz-extension://abc/signalsmith-processor.js',
 	semitones: 3,
 	tempo: 1.25,
-	overlapMs: 12,
-	quickSeek: true,
 }
 
 const parse = (m: unknown) => parseApplyMessage(JSON.stringify(m))
@@ -36,8 +33,8 @@ describe('parseApplyMessage', () => {
 	// A payload carrying our marker but a bad field is either a version skew or a
 	// forgery; either way the drop must leave a trace rather than stop audio unseen.
 	it('warns, naming the field, when one of ours is malformed', () => {
-		expect(parse({ ...valid, overlapMs: undefined })).toBeNull()
-		expect(warn).toHaveBeenCalledWith(expect.stringContaining('overlapMs'))
+		expect(parse({ ...valid, tempo: undefined })).toBeNull()
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('tempo'))
 	})
 
 	it('rejects a processorUrl that is not an extension URL', () => {
@@ -45,12 +42,11 @@ describe('parseApplyMessage', () => {
 	})
 
 	// Any MAIN-world script can post here, and an out-of-range value reaches
-	// restricted-float writes (`playbackRate`, `AudioParam.value`) that throw.
+	// `element.playbackRate`, a restricted float that throws.
 	it('clamps numbers onto the storage ranges', () => {
-		expect(parse({ ...valid, semitones: 1e6, tempo: 100, overlapMs: 500 })).toMatchObject({
+		expect(parse({ ...valid, semitones: 1e6, tempo: 100 })).toMatchObject({
 			semitones: MAX_SEMITONES,
 			tempo: MAX_TEMPO,
-			overlapMs: MAX_OVERLAP_MS,
 		})
 		expect(parse({ ...valid, tempo: 0.01 })).toMatchObject({ tempo: MIN_TEMPO })
 	})

@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 
-import { DEFAULT_AUDIO_QUALITY, MAX_OVERLAP_MS, MIN_OVERLAP_MS } from '@/lib/audioQuality'
 import {
 	DEFAULT_VIDEO_SETTING,
 	MAX_SEMITONES,
@@ -12,15 +11,13 @@ import {
 } from '@/lib/settings'
 import {
 	globalEnabled,
-	getAudioQuality,
-	setAudioQuality,
 	getRawVideoSetting,
 	setVideoSetting,
 	listVideoSettings,
 	removeVideoSetting,
 	clearVideoSettings,
 	watchVideoSettings,
-	migrateLegacyVideoSettings,
+	migrateLegacyStorage,
 } from '@/lib/storage'
 
 describe('video settings round-trip', () => {
@@ -107,7 +104,7 @@ describe('legacy layout migration', () => {
 			},
 		})
 
-		await migrateLegacyVideoSettings()
+		await migrateLegacyStorage()
 
 		expect(await listVideoSettings()).toEqual({
 			a: { enabled: true, semitones: 3, tempo: 1, title: 'Song' },
@@ -120,7 +117,7 @@ describe('legacy layout migration', () => {
 		await fakeBrowser.storage.local.set({ videoSettings: { a: { semitones: 3 } } })
 		await setVideoSetting('a', { semitones: -2 })
 
-		await migrateLegacyVideoSettings()
+		await migrateLegacyStorage()
 
 		expect(await getRawVideoSetting('a')).toMatchObject({ semitones: -2 })
 	})
@@ -130,16 +127,23 @@ describe('legacy layout migration', () => {
 			videoSettings: { a: { semitones: 99 }, dead: { enabled: true, semitones: 0 }, junk: 7 },
 		})
 
-		await migrateLegacyVideoSettings()
+		await migrateLegacyStorage()
 
 		expect(await listVideoSettings()).toEqual({
 			a: { enabled: true, semitones: MAX_SEMITONES, tempo: 1 },
 		})
 	})
 
+	// The old engine's WSOLA knobs mean nothing to Signalsmith.
+	it('drops the old engine tuning', async () => {
+		await fakeBrowser.storage.local.set({ audioQuality: { overlapMs: 12, quickSeek: true } })
+		await migrateLegacyStorage()
+		expect(await fakeBrowser.storage.local.get('audioQuality')).toEqual({})
+	})
+
 	it('does nothing once migrated', async () => {
 		await setVideoSetting('a', { semitones: 1 })
-		await migrateLegacyVideoSettings()
+		await migrateLegacyStorage()
 		expect(Object.keys(await listVideoSettings())).toEqual(['a'])
 	})
 })
@@ -309,49 +313,5 @@ describe('storage item fallbacks', () => {
 
 	it('globalEnabled defaults to true', async () => {
 		expect(await globalEnabled.getValue()).toBe(true)
-	})
-
-	it('audioQuality defaults to DEFAULT_AUDIO_QUALITY', async () => {
-		expect(await getAudioQuality()).toEqual(DEFAULT_AUDIO_QUALITY)
-	})
-})
-
-describe('audio quality at the storage boundary', () => {
-	beforeEach(() => fakeBrowser.reset())
-
-	async function seedRaw(value: unknown): Promise<void> {
-		await fakeBrowser.storage.local.set({ audioQuality: value })
-	}
-
-	// A missing field is dropped by JSON.stringify on the way to the page, and the
-	// page-side parser then rejects every apply: pitch and tempo stop working.
-	it('backfills a missing field on read', async () => {
-		await seedRaw({ quickSeek: false })
-		expect(await getAudioQuality()).toEqual({
-			overlapMs: DEFAULT_AUDIO_QUALITY.overlapMs,
-			quickSeek: false,
-		})
-	})
-
-	// v1.1.1's slider went down to 0, which SoundTouch silently ignores.
-	it('lifts a legacy overlap of 0 to the floor on read', async () => {
-		await seedRaw({ overlapMs: 0, quickSeek: true })
-		expect(await getAudioQuality()).toEqual({ overlapMs: MIN_OVERLAP_MS, quickSeek: true })
-	})
-
-	it('replaces non-numeric and non-object values', async () => {
-		await seedRaw({ overlapMs: '20', quickSeek: 'yes' })
-		expect(await getAudioQuality()).toEqual(DEFAULT_AUDIO_QUALITY)
-		await seedRaw('garbage')
-		expect(await getAudioQuality()).toEqual(DEFAULT_AUDIO_QUALITY)
-	})
-
-	it('clamps on write and merges a partial', async () => {
-		await setAudioQuality({ quickSeek: false })
-		expect(await setAudioQuality({ overlapMs: 500 })).toEqual({
-			overlapMs: MAX_OVERLAP_MS,
-			quickSeek: false,
-		})
-		expect(await getAudioQuality()).toEqual({ overlapMs: MAX_OVERLAP_MS, quickSeek: false })
 	})
 })

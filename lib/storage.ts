@@ -1,6 +1,5 @@
 import { storage } from 'wxt/utils/storage'
 
-import { DEFAULT_AUDIO_QUALITY, normalizeQuality, type AudioQuality } from '@/lib/audioQuality'
 import {
 	DEFAULT_VIDEO_SETTING,
 	clampSemitones,
@@ -51,22 +50,8 @@ const videoKey = (videoId: string) => `local:${VIDEO_KEY_PREFIX}${videoId}` as c
 /** The pre-1.4 layout: every entry in one `Record<videoId, VideoSetting>`. */
 const LEGACY_VIDEO_SETTINGS_KEY = 'local:videoSettings'
 
-/** WSOLA quality knobs, shared across all videos. Reached only via the accessors below. */
-const audioQuality = storage.defineItem<AudioQuality>('local:audioQuality', {
-	fallback: DEFAULT_AUDIO_QUALITY,
-})
-
-/** The shared quality knobs, normalized on read (see `normalizeQuality`). */
-export async function getAudioQuality(): Promise<AudioQuality> {
-	return normalizeQuality(await audioQuality.getValue())
-}
-
-/** Merge `partial` into the stored knobs, normalized on write. */
-export async function setAudioQuality(partial: Partial<AudioQuality>): Promise<AudioQuality> {
-	const next = normalizeQuality({ ...(await getAudioQuality()), ...partial })
-	await audioQuality.setValue(next)
-	return next
-}
+/** Pre-1.4 SoundTouch tuning knobs; the Signalsmith engine has no equivalent. */
+const LEGACY_AUDIO_QUALITY_KEY = 'local:audioQuality'
 
 /**
  * The stored entry for `videoId`, merged over the defaults and normalized, or
@@ -154,11 +139,20 @@ export function watchVideoSettings(cb: (videoIds: string[]) => void): () => void
 }
 
 /**
- * Move entries from the pre-1.4 single-object layout to one key per video, then
- * drop the old object. Idempotent, so it can run on every background start. An
- * entry already stored under its own key wins: it was written after the update.
+ * Bring a pre-1.4 install's storage up to date. Idempotent and a couple of reads
+ * once done, so it can run on every background start.
  */
-export async function migrateLegacyVideoSettings(): Promise<void> {
+export async function migrateLegacyStorage(): Promise<void> {
+	await migrateLegacyVideoSettings()
+	await storage.removeItem(LEGACY_AUDIO_QUALITY_KEY)
+}
+
+/**
+ * Move entries from the single-object layout to one key per video, then drop the
+ * old object. An entry already stored under its own key wins: it was written after
+ * the update.
+ */
+async function migrateLegacyVideoSettings(): Promise<void> {
 	const legacy = await storage.getItem<Record<string, unknown>>(LEGACY_VIDEO_SETTINGS_KEY)
 	if (legacy === null) return
 	if (typeof legacy === 'object') {

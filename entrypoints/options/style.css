@@ -144,27 +144,6 @@ body {
 	color: var(--text-dim);
 }
 
-.quality-control {
-	display: flex;
-	align-items: center;
-	gap: 14px;
-}
-.quality-control .slider {
-	width: 170px;
-}
-.quality-value {
-	min-width: 38px;
-	padding: 3px 0;
-	font-family: var(--font-mono);
-	font-size: 13px;
-	font-weight: 600;
-	font-variant-numeric: tabular-nums;
-	text-align: center;
-	color: var(--accent);
-	background: var(--accent-soft);
-	border-radius: var(--radius-sm);
-}
-
 /* ── Saved video rows ───────────────────────────────── */
 .vlist {
 	max-height: 360px;

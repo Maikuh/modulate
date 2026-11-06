@@ -1,6 +1,5 @@
 import { storage } from 'wxt/utils/storage'
 
-import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality'
 import {
 	APPLY_EVENT,
 	STATUS_EVENT,
@@ -16,7 +15,6 @@ import {
 import { DEFAULT_VIDEO_SETTING, NO_OP, resolveSetting, type ResolvedSetting } from '@/lib/settings'
 import {
 	globalEnabled,
-	getAudioQuality,
 	getRawVideoSetting,
 	setVideoSetting,
 	watchVideoSettings,
@@ -28,7 +26,7 @@ export default defineContentScript({
 	main(ctx) {
 		// The worklet URL must be resolved here — the main-world script has no
 		// access to extension APIs like `browser.runtime.getURL`.
-		const processorUrl = browser.runtime.getURL('/soundtouch-processor.js')
+		const processorUrl = browser.runtime.getURL('/signalsmith-processor.js')
 
 		// Inject the audio engine into the page's MAIN world. It can't live in this
 		// sandbox: Firefox throws DataCloneError when an AudioWorkletNode serializes
@@ -108,35 +106,30 @@ export default defineContentScript({
 			}
 		}
 
-		// Quality last forwarded, reused when standing the engine down on invalidation.
-		let lastQuality: AudioQuality = { ...DEFAULT_AUDIO_QUALITY }
 		let applySeq = 0
 
 		/** Forward settings to the main-world engine. */
-		function postApply(setting: ResolvedSetting, quality: AudioQuality): void {
+		function postApply(setting: ResolvedSetting): void {
 			const msg: ApplyMessage = {
 				source: 'modulate',
 				type: 'apply',
 				processorUrl,
 				semitones: setting.semitones,
 				tempo: setting.tempo,
-				overlapMs: quality.overlapMs,
-				quickSeek: quality.quickSeek,
 			}
 			// JSON string payload: primitives cross the content/page membrane without
 			// `cloneInto`; a raw object would arrive as `null` in the page realm.
 			channel.dispatchEvent(new CustomEvent(APPLY_EVENT, { detail: JSON.stringify(msg) }))
 		}
 
-		/** Resolve the effective pitch/tempo + quality and forward them to the engine. */
+		/** Resolve the effective pitch/tempo and forward them to the engine. */
 		async function apply(): Promise<void> {
 			if (!ctx.isValid) return
 			const seq = ++applySeq
 			const videoId = getVideoId(location.href)
 			// Independent reads — fetch them concurrently rather than serially.
-			const [global, quality, video] = await Promise.all([
+			const [global, video] = await Promise.all([
 				globalEnabled.getValue(),
-				getAudioQuality(),
 				videoId ? getRawVideoSetting(videoId) : Promise.resolve(undefined),
 			])
 			const resolved = resolveSetting(global, video)
@@ -146,8 +139,7 @@ export default defineContentScript({
 			// after it would leave the page applying stale settings.
 			if (!ctx.isValid || seq !== applySeq) return
 
-			lastQuality = quality
-			postApply(resolved, quality)
+			postApply(resolved)
 
 			// Tell the background to render the toolbar badge for this tab.
 			lastBadge = {
@@ -289,7 +281,6 @@ export default defineContentScript({
 				const videoId = getVideoId(location.href)
 				if (videoId && ids.includes(videoId)) scheduleApply('videoSettings')
 			}),
-			storage.watch('local:audioQuality', () => scheduleApply('audioQuality')),
 			storage.watch('local:globalEnabled', () => scheduleApply('globalEnabled')),
 		]
 		ctx.onInvalidated(() => {
@@ -298,7 +289,7 @@ export default defineContentScript({
 			// uninstalling the extension invalidates us, but the worklet module is already
 			// loaded and keeps processing. Stand it down so the video doesn't stay
 			// transposed (and time-stretched) until a reload.
-			postApply(NO_OP, lastQuality)
+			postApply(NO_OP)
 		})
 
 		scheduleApply('startup')

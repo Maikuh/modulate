@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 import { ContentScriptContext } from 'wxt/utils/content-script-context'
 
-import { DEFAULT_AUDIO_QUALITY } from '@/lib/audioQuality'
 import {
 	APPLY_EVENT,
 	STATUS_EVENT,
@@ -12,7 +11,7 @@ import {
 	type PopupResponse,
 } from '@/lib/messaging'
 import { TEMPO_STEP } from '@/lib/settings'
-import { globalEnabled, setAudioQuality, setVideoSetting, getRawVideoSetting } from '@/lib/storage'
+import { globalEnabled, setVideoSetting, getRawVideoSetting } from '@/lib/storage'
 
 import content from './content'
 
@@ -188,33 +187,16 @@ describe('content script', () => {
 		cs.stop()
 	})
 
-	it('carries the resolved settings, the worklet URL and the quality knobs', async () => {
+	it('carries the resolved settings and the worklet URL', async () => {
 		await setVideoSetting('vid1', { semitones: -2, tempo: 1.5 })
 		const cs = await startContentScript()
 
 		expect(cs.applies().at(-1)).toEqual({
 			source: 'modulate',
 			type: 'apply',
-			processorUrl: expect.stringContaining('soundtouch-processor.js'),
+			processorUrl: expect.stringContaining('signalsmith-processor.js'),
 			semitones: -2,
 			tempo: 1.5,
-			overlapMs: expect.any(Number),
-			quickSeek: expect.any(Boolean),
-		})
-		cs.stop()
-	})
-
-	// A stored quality missing a field would otherwise drop that key from the JSON,
-	// and the page-side parser rejects the whole message — every apply, forever.
-	it('sends a complete quality payload even when storage holds a partial one', async () => {
-		await fakeBrowser.storage.local.set({ audioQuality: { quickSeek: false } })
-		await setVideoSetting('vid1', { semitones: 1 })
-		const cs = await startContentScript()
-
-		expect(cs.applies().at(-1)).toMatchObject({
-			semitones: 1,
-			overlapMs: DEFAULT_AUDIO_QUALITY.overlapMs,
-			quickSeek: false,
 		})
 		cs.stop()
 	})
@@ -439,10 +421,6 @@ describe('content script', () => {
 			await globalEnabled.setValue(false)
 			await tick()
 			expect(cs.applies().at(-1)).toMatchObject({ semitones: 0, tempo: 1 })
-
-			await setAudioQuality({ overlapMs: 30 })
-			await tick()
-			expect(cs.applies().at(-1)).toMatchObject({ overlapMs: 30 })
 			cs.stop()
 		})
 

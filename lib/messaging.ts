@@ -16,10 +16,9 @@
  * not `window.postMessage`, which every script in the page can read and forge.
  *
  * Imported by the MAIN-world bundle, so it must stay free of extension APIs
- * (it pulls only the side-effect-free `settings` and `audioQuality` modules).
+ * (it pulls only the side-effect-free `settings` module).
  */
 
-import { clampOverlapMs, type AudioQuality } from '@/lib/audioQuality'
 import { clampSemitones, clampTempo, type ResolvedSetting } from '@/lib/settings'
 
 export type PopupMessage =
@@ -79,15 +78,14 @@ export const STATUS_EVENT = 'modulate:status'
  * content/page membrane in every browser, an object arrives as `null` in Firefox
  * without `cloneInto` and in Chrome's isolated worlds.
  * Carries the effective pitch/tempo (already resolved against the toggles) and
- * the WSOLA time-stretch tuning for the worklet.
+ * the worklet's URL.
  */
 export type ApplyMessage = {
 	source: 'modulate'
 	type: 'apply'
 	/** Extension URL of the worklet processor (main world can't call `getURL`). */
 	processorUrl: string
-} & ResolvedSetting &
-	AudioQuality
+} & ResolvedSetting
 
 /**
  * Parse an inbound payload into an `ApplyMessage`, or null if it isn't one.
@@ -126,8 +124,6 @@ export function parseApplyMessage(raw: string): ApplyMessage | null {
 		return reject('processorUrl')
 	if (!isFiniteNumber(m.semitones)) return reject('semitones')
 	if (!isFiniteNumber(m.tempo)) return reject('tempo')
-	if (!isFiniteNumber(m.overlapMs)) return reject('overlapMs')
-	if (typeof m.quickSeek !== 'boolean') return reject('quickSeek')
 
 	return {
 		source: 'modulate',
@@ -135,8 +131,6 @@ export function parseApplyMessage(raw: string): ApplyMessage | null {
 		processorUrl: m.processorUrl,
 		semitones: clampSemitones(m.semitones),
 		tempo: clampTempo(m.tempo),
-		overlapMs: clampOverlapMs(m.overlapMs),
-		quickSeek: m.quickSeek,
 	}
 }
 

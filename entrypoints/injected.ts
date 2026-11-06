@@ -16,8 +16,7 @@ import { NO_OP, isNoOp } from '@/lib/settings'
  * `processorOptions` object into the page-realm worklet.
  *
  * The content script can't reach the page realm directly either, so it forwards
- * the resolved settings here — pitch, tempo, the WSOLA quality knobs, and the
- * worklet URL (which only the content script can resolve, having the extension
+ * the resolved settings here — pitch, tempo and the worklet URL (which only the content script can resolve, having the extension
  * APIs) — as `APPLY_EVENT`s on the `<script>` element that loaded this file, and
  * hears back via `STATUS_EVENT`s on the same element. The payload is a JSON
  * string: primitives cross the content/page membrane without `cloneInto`.
@@ -250,11 +249,6 @@ export default defineUnlistedScript(() => {
 		// Bind (or rebind on swap) the lifecycle listeners so a later media reload or
 		// YouTube-driven rate reset triggers a replay without waiting for the next nav.
 		trackVideo(el)
-		// Set quality before the graph is built so `ensureGraph` constructs with it.
-		audioEngine.applyQuality({
-			overlapMs: msg.overlapMs,
-			quickSeek: msg.quickSeek,
-		})
 		// The autoplay policy already refused this page; don't ask again until the
 		// page sees a gesture. Once a graph exists, re-applies never ask at all.
 		if (needsGraph && !audioEngine.hasGraph && blocked) return waitNatively(el, msg)
