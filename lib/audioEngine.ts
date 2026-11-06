@@ -25,7 +25,11 @@ import { isNoOp, type ResolvedSetting } from '@/lib/settings'
  *    audio flows through this graph. So when transpose is "off" we keep the
  *    graph wired and bypass it rather than disconnecting (which would mute the
  *    element).
- *  - An AudioContext starts `suspended`; it must be resumed from a user gesture.
+ *  - An AudioContext only runs once the browser's autoplay policy allows it —
+ *    after a user gesture in the page, or earlier where the browser trusts the
+ *    site (Chrome's media engagement, a Firefox per-site autoplay permission).
+ *    Capturing into a context that never starts plays the element silently, so
+ *    `build()` checks the context actually runs BEFORE capturing.
  *
  * Tempo: slowing the video is done by setting the **element's** `playbackRate`
  * (which lowers pitch like a record), then mirroring that to the SoundTouch
@@ -35,6 +39,26 @@ import { isNoOp, type ResolvedSetting } from '@/lib/settings'
  * On YouTube the same `<video>` element persists across SPA navigations, so a
  * single graph built once serves every video; only the parameters change.
  */
+/**
+ * How long the build waits for a fresh context to start before concluding the
+ * autoplay policy refused it. Generous on purpose: an allowed context usually runs
+ * within tens of milliseconds, but reading a slow start as a refusal would make a
+ * viewer who already clicked the page click again — while a real refusal only
+ * delays the "click the page" notice by this much.
+ */
+const START_TIMEOUT_MS = 1000
+
+/**
+ * The browser won't let an AudioContext run in this page yet (autoplay policy).
+ * Nothing was captured; building again after a gesture in the page will work.
+ */
+export class AudioBlockedError extends Error {
+	constructor() {
+		super('audio is blocked until the page is clicked or typed in')
+		this.name = 'AudioBlockedError'
+	}
+}
+
 class AudioEngine {
 	private ctx: AudioContext | null = null
 	private source: MediaElementAudioSourceNode | null = null
@@ -134,6 +158,15 @@ class AudioEngine {
 		let node: SoundTouchNode
 		let source: MediaElementAudioSourceNode
 		try {
+			// Ask the autoplay policy before anything irreversible. A context that won't
+			// run would leave the captured element playing silently — and capture can't
+			// be undone — so if it doesn't start, close it and let the caller retry after
+			// a gesture. This is a real check, not a guess from `userActivation`: browsers
+			// also let trusted sites start audio without one (Chrome's media engagement
+			// score, which YouTube regulars clear easily; Firefox's per-site permission).
+			await this.resume(START_TIMEOUT_MS)
+			if (ctx.state !== 'running') throw new AudioBlockedError()
+
 			await SoundTouchNode.register(ctx, processorUrl)
 
 			node = new SoundTouchNode({ context: ctx })

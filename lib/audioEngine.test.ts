@@ -78,8 +78,16 @@ class FakeAudioContext {
 		return this.source
 	}
 
-	async resume(): Promise<void> {
+	/**
+	 * Whether the autoplay policy lets a context start. When it doesn't, `resume()`
+	 * stays pending, as the spec has it — it neither resolves nor rejects.
+	 */
+	static allowStart = true
+
+	resume(): Promise<void> {
+		if (!FakeAudioContext.allowStart) return new Promise(() => {})
 		this.state = 'running'
+		return Promise.resolve()
 	}
 
 	async close(): Promise<void> {
@@ -89,6 +97,7 @@ class FakeAudioContext {
 	}
 
 	static reset(): void {
+		FakeAudioContext.allowStart = true
 		FakeAudioContext.live = 0
 		FakeAudioContext.created = []
 		FakeAudioContext.captured = new Set()
@@ -102,9 +111,13 @@ const PROCESSOR_URL = 'chrome-extension://abc/soundtouch-processor.js'
 /** The engine is a module singleton, so each test needs a fresh module graph. */
 async function freshEngine() {
 	vi.resetModules()
-	const { audioEngine } = await import('@/lib/audioEngine')
-	return audioEngine
+	const mod = await import('@/lib/audioEngine')
+	AudioBlockedError = mod.AudioBlockedError
+	return mod.audioEngine
 }
+
+/** From the same fresh module graph as the engine, so `instanceof` holds. */
+let AudioBlockedError: typeof import('@/lib/audioEngine').AudioBlockedError
 
 function makeVideo(): HTMLVideoElement {
 	const el = document.createElement('video')
@@ -470,27 +483,56 @@ describe('AudioEngine — graph lifecycle', () => {
 		expect(FakeAudioContext.created).toHaveLength(1)
 	})
 
-	// resume() resolving is not proof the context resumed — autoplay policy can
-	// leave it suspended, and a suspended context on a captured element is silence.
-	it('reports running only once the context has actually resumed', async () => {
+	// Capture is irreversible, and an element captured into a context that never
+	// starts plays silently. So the build asks first, and captures nothing on a no.
+	it('captures only into a context the browser lets run', async () => {
+		const engine = await freshEngine()
+		const el = makeVideo()
+		FakeAudioContext.allowStart = false
+
+		vi.useFakeTimers()
+		try {
+			const outcome = engine.ensureGraph(el, PROCESSOR_URL).catch((err: unknown) => err)
+			await vi.advanceTimersByTimeAsync(2000)
+			expect(await outcome).toBeInstanceOf(AudioBlockedError)
+		} finally {
+			vi.useRealTimers()
+		}
+
+		expect(FakeAudioContext.captured.has(el)).toBe(false)
+		expect(FakeAudioContext.live).toBe(0)
+		expect(FakeSoundTouchNode.register).not.toHaveBeenCalled()
+		expect(engine.hasGraph).toBe(false)
+
+		// After a gesture the same element is still capturable.
+		FakeAudioContext.allowStart = true
+		await engine.ensureGraph(el, PROCESSOR_URL)
+		expect(engine.hasGraph).toBe(true)
+		expect(engine.running).toBe(true)
+	})
+
+	// Without activation the browser may still allow audio (Chrome's media
+	// engagement, a Firefox site permission): then the build goes straight ahead.
+	it('builds without user activation when the browser allows audio', async () => {
 		const engine = await freshEngine()
 		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
-
-		expect(engine.running).toBe(false)
-		await engine.resume()
 		expect(engine.running).toBe(true)
 	})
 
 	// Per spec, resume() on a context the autoplay policy won't start stays pending.
-	// Awaited unbounded, it would hang the caller and every apply queued behind it.
-	it('bounds resume() when the context never starts', async () => {
-		const engine = await freshEngine()
-		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
-		vi.spyOn(currentCtx(), 'resume').mockReturnValue(new Promise(() => {}))
+	// Awaited unbounded, the build would hang along with every apply queued behind it.
+	it('gives up on a context that never starts instead of hanging', async () => {
+		vi.useFakeTimers()
+		try {
+			const engine = await freshEngine()
+			FakeAudioContext.allowStart = false
 
-		await engine.resume(10)
-
-		expect(engine.running).toBe(false)
+			const outcome = engine.ensureGraph(makeVideo(), PROCESSOR_URL).catch((err: unknown) => err)
+			await vi.advanceTimersByTimeAsync(2000)
+			expect(await outcome).toBeInstanceOf(AudioBlockedError)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it('dispose closes the context and clears the graph', async () => {

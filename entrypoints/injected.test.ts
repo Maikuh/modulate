@@ -6,6 +6,7 @@ import type { ApplyMessage } from '@/lib/messaging'
 // tests are about the MAIN-world script's own logic — what it decides to call, and
 // when — so the engine is a spy surface.
 vi.mock('@/lib/audioEngine', () => ({
+	AudioBlockedError: class AudioBlockedError extends Error {},
 	audioEngine: {
 		hasGraph: false,
 		running: true,
@@ -17,11 +18,23 @@ vi.mock('@/lib/audioEngine', () => ({
 	},
 }))
 
-import { audioEngine } from '@/lib/audioEngine'
+import { AudioBlockedError, audioEngine } from '@/lib/audioEngine'
 
 import injected, { INSTANCE_KEY } from './injected'
 
 const engine = vi.mocked(audioEngine)
+
+/**
+ * Whether the browser's autoplay policy lets audio start. The real engine asks
+ * by starting a context before it captures anything, and rejects with
+ * `AudioBlockedError` (capturing nothing) when the answer is no.
+ */
+function audioAllowed(allowed: boolean): void {
+	engine.ensureGraph.mockImplementation(async () => {
+		if (!allowed) throw new AudioBlockedError()
+		engine.hasGraph = true
+	})
+}
 const PROCESSOR_URL = 'chrome-extension://abc123/soundtouch-processor.js'
 
 function message(overrides: Partial<ApplyMessage> = {}): ApplyMessage {
@@ -95,9 +108,7 @@ beforeEach(() => {
 	engine.running = true
 	// Like the real engine, a completed build means a graph exists. A hand-set flag
 	// alone lets the tests describe states the script can never actually reach.
-	engine.ensureGraph.mockImplementation(async () => {
-		engine.hasGraph = true
-	})
+	audioAllowed(true)
 	document.body.innerHTML = ''
 })
 
@@ -306,109 +317,107 @@ describe('injected script — media lifecycle replay', () => {
 	})
 })
 
-describe('injected script — user activation gate', () => {
-	const activation = (hasBeenActive: boolean) => {
+describe('injected script — autoplay gate', () => {
+	// Capturing into a context that never starts plays the element silently, which
+	// is unrecoverable — so when the browser says no, the build waits for a gesture.
+	it('waits for a gesture in the page when the browser will not start audio', async () => {
+		audioAllowed(false)
+		mountVideo()
+		start()
+
+		await post(message({ semitones: 4 }))
+		expect(engine.apply).not.toHaveBeenCalled()
+
+		// A real pointerdown grants the page activation, so the browser now says yes.
+		audioAllowed(true)
+		window.dispatchEvent(new Event('pointerdown'))
+		await tick()
+
+		expect(engine.apply).toHaveBeenCalledWith({ semitones: 4, tempo: 1 })
+	})
+
+	// The point of asking the browser instead of reading `userActivation`: Chrome
+	// lets sites with high media engagement (YouTube, for its regulars) start audio
+	// before any click, and the change made from the popup should land at once.
+	it('applies at once when the browser allows audio without user activation', async () => {
 		Object.defineProperty(navigator, 'userActivation', {
-			value: { hasBeenActive, isActive: hasBeenActive },
+			value: { hasBeenActive: false, isActive: false },
 			configurable: true,
 		})
-	}
+		try {
+			mountVideo()
+			start()
 
-	afterEach(() => {
-		// happy-dom has no userActivation of its own; remove the stub so the older-
-		// Firefox fallthrough path is what other suites see.
-		Reflect.deleteProperty(navigator, 'userActivation')
+			await post(message({ semitones: 4 }))
+
+			expect(engine.apply).toHaveBeenCalledWith({ semitones: 4, tempo: 1 })
+		} finally {
+			Reflect.deleteProperty(navigator, 'userActivation')
+		}
 	})
 
-	// Building under a suspended context captures the element and plays it silently,
-	// which is unrecoverable — so the first build waits for a real gesture.
-	it('queues the first build until the page has been interacted with', async () => {
-		activation(false)
-		mountVideo()
+	// Every ask opens and closes a context (and Chrome logs a warning for it), so a
+	// refusal holds until the page sees a gesture rather than being re-asked per trigger.
+	it('asks the browser once, not on every trigger, while waiting', async () => {
+		audioAllowed(false)
+		const video = mountVideo()
 		start()
 
 		await post(message({ semitones: 4 }))
-		expect(engine.ensureGraph).not.toHaveBeenCalled()
-
-		// The retry re-enters apply() and re-checks the gate, so the flag has to flip
-		// with the gesture — as it does in a real browser, where a pointerdown grants
-		// the document sticky activation. Without flipping it the apply would simply
-		// re-queue, which is the correct behavior for a page still lacking activation.
-		activation(true)
-		window.dispatchEvent(new Event('pointerdown'))
+		await post(message({ semitones: 5 }))
+		video.dispatchEvent(new Event('loadstart'))
 		await tick()
 
 		expect(engine.ensureGraph).toHaveBeenCalledOnce()
-		expect(engine.apply).toHaveBeenCalledWith(expect.objectContaining({ semitones: 4 }))
 	})
 
-	it('keeps queueing while the page still has no activation', async () => {
-		activation(false)
+	it('keeps waiting when the browser still refuses after a gesture', async () => {
+		audioAllowed(false)
 		mountVideo()
 		start()
+		const seen: string[] = []
+		const onMessage = (e: MessageEvent) => {
+			if (typeof e.data === 'string' && e.data.includes('modulate-page')) seen.push(e.data)
+		}
+		window.addEventListener('message', onMessage)
+		teardown.push(() => window.removeEventListener('message', onMessage))
 
 		await post(message({ semitones: 4 }))
 		window.dispatchEvent(new Event('pointerdown'))
 		await tick()
 
-		expect(engine.ensureGraph).not.toHaveBeenCalled()
-	})
-
-	it('builds immediately once the page has sticky activation', async () => {
-		activation(true)
-		mountVideo()
-		start()
-
-		await post(message({ semitones: 4 }))
-		expect(engine.ensureGraph).toHaveBeenCalledOnce()
-	})
-
-	it('does not gate re-applies once a graph exists', async () => {
-		activation(false)
-		engine.hasGraph = true
-		mountVideo()
-		start()
-
-		await post(message({ semitones: 4 }))
-		expect(engine.ensureGraph).toHaveBeenCalledOnce()
+		expect(engine.ensureGraph).toHaveBeenCalledTimes(2)
+		expect(engine.apply).not.toHaveBeenCalled()
+		expect(seen.at(-1)).toContain('waiting-for-gesture')
 	})
 })
 
 describe('injected script — latest settings win', () => {
-	const activation = (hasBeenActive: boolean) => {
-		Object.defineProperty(navigator, 'userActivation', {
-			value: { hasBeenActive, isActive: hasBeenActive },
-			configurable: true,
-		})
-	}
-
-	afterEach(() => Reflect.deleteProperty(navigator, 'userActivation'))
-
 	// Set +4 on an autoplaying page nobody clicked, press Reset, then click: the
 	// click must apply the reset, not the change it replaced.
 	it('does not replay a queued change the user has since reset', async () => {
-		activation(false)
+		audioAllowed(false)
 		mountVideo()
 		start()
 
 		await post(message({ semitones: 4 }))
 		await post(message())
-		activation(true)
+		audioAllowed(true)
 		window.dispatchEvent(new Event('pointerdown'))
 		await tick()
 
-		expect(engine.ensureGraph).not.toHaveBeenCalled()
+		expect(engine.ensureGraph).toHaveBeenCalledOnce() // Only the refused ask.
 		expect(engine.apply).not.toHaveBeenCalledWith(expect.objectContaining({ semitones: 4 }))
 	})
 
 	it('applies the newest change on the first gesture', async () => {
-		activation(false)
+		audioAllowed(false)
 		mountVideo()
 		start()
 
 		await post(message({ semitones: 4 }))
 		await post(message({ semitones: 6 }))
-		activation(true)
+		audioAllowed(true)
 		window.dispatchEvent(new Event('keydown'))
 		await tick()
 
@@ -500,8 +509,8 @@ describe('injected script — waiting for the player', () => {
 })
 
 describe('injected script — context that will not start', () => {
-	// The older-Firefox fallthrough can build without activation; the captured
-	// element then plays silently until a gesture lets the context resume.
+	// The build only captures into a running context, but a browser can suspend it
+	// later; the captured element then plays silently until a gesture resumes it.
 	it('warns and retries on the next gesture', async () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 		engine.running = false
@@ -571,8 +580,6 @@ describe('injected script — status reports', () => {
 		return seen
 	}
 
-	afterEach(() => Reflect.deleteProperty(navigator, 'userActivation'))
-
 	it('reports applied once the settings are live', async () => {
 		mountVideo()
 		start()
@@ -594,10 +601,7 @@ describe('injected script — status reports', () => {
 	})
 
 	it('reports that it is waiting for a click in the page', async () => {
-		Object.defineProperty(navigator, 'userActivation', {
-			value: { hasBeenActive: false, isActive: false },
-			configurable: true,
-		})
+		audioAllowed(false)
 		mountVideo()
 		start()
 		const seen = collectStatuses()

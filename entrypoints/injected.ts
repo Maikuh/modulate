@@ -1,4 +1,4 @@
-import { audioEngine } from '@/lib/audioEngine'
+import { AudioBlockedError, audioEngine } from '@/lib/audioEngine'
 import {
 	parseApplyMessage,
 	type ApplyMessage,
@@ -79,6 +79,11 @@ export default defineUnlistedScript(() => {
 	// the <video>, for the graph build) cannot be overtaken by that older change.
 	let lastMsg: ApplyMessage | null = null
 	let gestureHooked = false
+	// Set when the autoplay policy refused to start audio; cleared by the first
+	// gesture in the page. Without it, every trigger while we wait (each message,
+	// each media event) would open and close another probe context, and Chrome
+	// logs a console warning for each one.
+	let blocked = false
 
 	// One worker converges the engine onto `lastMsg`. `dirty` marks that it moved
 	// since the worker last read it; the worker loops until it settles.
@@ -161,6 +166,7 @@ export default defineUnlistedScript(() => {
 		gestureHooked = true
 		const retry = () => {
 			gestureHooked = false
+			blocked = false
 			// Drop both listeners — the first gesture fires one; the sibling would
 			// otherwise linger (and re-arming on a later defer would stack them).
 			window.removeEventListener('pointerdown', retry, true)
@@ -193,25 +199,9 @@ export default defineUnlistedScript(() => {
 			return 'applied'
 		}
 
-		// Defer the FIRST graph build until the page has user activation. Building
-		// captures the element (irreversibly) and routes its audio through a context
-		// that starts `suspended`; without activation `resume()` can't run, so the
-		// captured element would play silently.
-		//
-		// Note this gates EVERY trigger, popup clicks included. `hasBeenActive` is a
-		// property of THIS window, and the popup is a separate browsing context at a
-		// chrome-extension:// origin — clicking it grants the YouTube document
-		// nothing. So a pitch change made from the popup on an autoplaying page that
-		// the user never clicked queues here like any auto-apply, until the first
-		// pointerdown/keydown in the page itself.
-		//
-		// When the activation API is unavailable (older Firefox) we can't tell, so we
-		// fall through and build anyway. Once a graph exists, re-applies are cheap.
-		const ua = navigator.userActivation
-		if (!audioEngine.hasGraph && ua && !ua.hasBeenActive) {
-			hookGesture()
-			return 'waiting-for-gesture'
-		}
+		// The autoplay policy already refused this page; don't ask again until the
+		// page sees a gesture. Once a graph exists, re-applies never ask at all.
+		if (!audioEngine.hasGraph && blocked) return 'waiting-for-gesture'
 
 		const el = await waitForVideo()
 		if (dirty) return null
@@ -229,12 +219,26 @@ export default defineUnlistedScript(() => {
 			overlapMs: msg.overlapMs,
 			quickSeek: msg.quickSeek,
 		})
-		await audioEngine.ensureGraph(el, msg.processorUrl)
+		try {
+			await audioEngine.ensureGraph(el, msg.processorUrl)
+		} catch (err) {
+			// The first build asks the browser whether audio may start, and captures
+			// nothing when it may not. That can't be predicted from here: sticky
+			// activation (`navigator.userActivation`) is one way in, but browsers also
+			// let trusted sites start audio without it — Chrome's media engagement
+			// score, which regular YouTube viewers clear, or a Firefox per-site
+			// permission. When the answer is no, wait for a pointerdown/keydown in the
+			// page itself: popup clicks and shortcuts happen in another browsing
+			// context and grant this document nothing.
+			if (!(err instanceof AudioBlockedError)) throw err
+			blocked = true
+			hookGesture()
+			return dirty ? null : 'waiting-for-gesture'
+		}
 		if (dirty) return null
 		audioEngine.apply({ semitones: msg.semitones, tempo: msg.tempo })
-		// Best-effort: the gate above means we normally arrive with activation, but
-		// the older-Firefox fallthrough can reach here without it, in which case the
-		// context stays suspended and the captured element plays silently.
+		// The build only captures into a running context, but a browser can still
+		// suspend one later (e.g. on some audio-session interruptions).
 		await audioEngine.resume()
 		if (!audioEngine.running) {
 			console.warn('[modulate] audio context did not resume; click the page to start audio')
