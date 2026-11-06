@@ -407,6 +407,20 @@ describe('content script', () => {
 			cs.stop()
 		})
 
+		it('re-applies when this video is edited elsewhere, and only then', async () => {
+			const cs = await startContentScript()
+			cs.reset()
+
+			await setVideoSetting('other', { semitones: 5 })
+			await tick()
+			expect(cs.applies()).toHaveLength(0)
+
+			await setVideoSetting('vid1', { semitones: 2 })
+			await tick()
+			expect(cs.applies().at(-1)).toMatchObject({ semitones: 2 })
+			cs.stop()
+		})
+
 		// The page-realm engine outlives the content script: disabling or updating the
 		// extension would otherwise leave the video transposed until a reload.
 		it('stands the engine down when the extension context is invalidated', async () => {

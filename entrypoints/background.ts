@@ -1,5 +1,6 @@
 import { logSendFailure, type BadgeMessage, type PopupMessage } from '@/lib/messaging'
 import { TEMPO_STEP, isNoOp } from '@/lib/settings'
+import { migrateLegacyVideoSettings } from '@/lib/storage'
 
 /** Keyboard `commands` → the `PopupMessage` to send the active tab's content script. */
 const COMMAND_MESSAGES: Record<string, PopupMessage> = {
@@ -10,6 +11,15 @@ const COMMAND_MESSAGES: Record<string, PopupMessage> = {
 }
 
 export default defineBackground(() => {
+	// Pre-1.4 installs keep every video's settings in one object; move them to one
+	// key per video. Idempotent and a single read once done, so it simply runs on
+	// every background start rather than tracking whether it already has. Content
+	// scripts reading before it lands see the moved entries arrive as storage
+	// changes and re-apply.
+	migrateLegacyVideoSettings().catch((err) =>
+		console.error('[modulate] could not migrate saved video settings', err),
+	)
+
 	// MV3 Chrome exposes `browser.action`; MV2 Firefox exposes `browserAction`.
 	const action = browser.action ?? browser.browserAction
 	const ACCENT = '#646cff'

@@ -19,6 +19,8 @@ import {
 	listVideoSettings,
 	removeVideoSetting,
 	clearVideoSettings,
+	watchVideoSettings,
+	migrateLegacyVideoSettings,
 } from '@/lib/storage'
 
 describe('video settings round-trip', () => {
@@ -60,17 +62,90 @@ describe('video settings round-trip', () => {
 		expect(await listVideoSettings()).toEqual({})
 	})
 
-	it('clears all entries', async () => {
+	it('clears all entries, and nothing else', async () => {
 		await setVideoSetting('a', { semitones: 1 })
 		await setVideoSetting('b', { semitones: 2 })
+		await globalEnabled.setValue(false)
 		await clearVideoSettings()
 		expect(await listVideoSettings()).toEqual({})
+		expect(await globalEnabled.getValue()).toBe(false)
+	})
+
+	// Each tab serializes only its own writes. With every video in one object, two
+	// tabs writing at once read the same snapshot and the second write drops the first.
+	it('keeps concurrent writes for different videos', async () => {
+		await Promise.all([
+			setVideoSetting('a', { semitones: 1 }),
+			setVideoSetting('b', { semitones: 2 }),
+			setVideoSetting('c', { tempo: 1.5 }),
+		])
+		expect(Object.keys(await listVideoSettings()).sort()).toEqual(['a', 'b', 'c'])
+	})
+
+	it('reports which videos changed to a watcher', async () => {
+		const seen: string[][] = []
+		const off = watchVideoSettings((ids) => seen.push(ids))
+
+		await setVideoSetting('a', { semitones: 1 })
+		await globalEnabled.setValue(false)
+		await removeVideoSetting('a')
+		off()
+		await setVideoSetting('b', { semitones: 1 })
+
+		expect(seen).toEqual([['a'], ['a']])
 	})
 })
 
-// videoSettings is one object rewritten in full on every write, so a dead key
-// costs latency on every later nudge. An ENABLED entry at the no-op is dead by
-// definition: resolveSetting cannot tell it from having no entry.
+describe('legacy layout migration', () => {
+	beforeEach(() => fakeBrowser.reset())
+
+	it('moves every entry to its own key and drops the old object', async () => {
+		await fakeBrowser.storage.local.set({
+			videoSettings: {
+				a: { enabled: true, semitones: 3, tempo: 1, title: 'Song' },
+				b: { enabled: false, semitones: 0, tempo: 1 },
+			},
+		})
+
+		await migrateLegacyVideoSettings()
+
+		expect(await listVideoSettings()).toEqual({
+			a: { enabled: true, semitones: 3, tempo: 1, title: 'Song' },
+			b: { enabled: false, semitones: 0, tempo: 1 },
+		})
+		expect(await fakeBrowser.storage.local.get('videoSettings')).toEqual({})
+	})
+
+	it('keeps an entry written under its own key since the update', async () => {
+		await fakeBrowser.storage.local.set({ videoSettings: { a: { semitones: 3 } } })
+		await setVideoSetting('a', { semitones: -2 })
+
+		await migrateLegacyVideoSettings()
+
+		expect(await getRawVideoSetting('a')).toMatchObject({ semitones: -2 })
+	})
+
+	it('normalizes and prunes on the way', async () => {
+		await fakeBrowser.storage.local.set({
+			videoSettings: { a: { semitones: 99 }, dead: { enabled: true, semitones: 0 }, junk: 7 },
+		})
+
+		await migrateLegacyVideoSettings()
+
+		expect(await listVideoSettings()).toEqual({
+			a: { enabled: true, semitones: MAX_SEMITONES, tempo: 1 },
+		})
+	})
+
+	it('does nothing once migrated', async () => {
+		await setVideoSetting('a', { semitones: 1 })
+		await migrateLegacyVideoSettings()
+		expect(Object.keys(await listVideoSettings())).toEqual(['a'])
+	})
+})
+
+// An ENABLED entry at the no-op holds nothing: resolveSetting cannot tell it from
+// having no entry. Pruning keeps storage (and a future sync quota) to videos tuned.
 describe('no-op pruning', () => {
 	beforeEach(() => fakeBrowser.reset())
 
@@ -142,7 +217,9 @@ describe('range enforcement at the storage boundary', () => {
 
 	/** Write straight past `setVideoSetting` to simulate a corrupt/legacy entry. */
 	async function seedRaw(entries: Record<string, unknown>): Promise<void> {
-		await fakeBrowser.storage.local.set({ videoSettings: entries })
+		await fakeBrowser.storage.local.set(
+			Object.fromEntries(Object.entries(entries).map(([id, v]) => [`video:${id}`, v])),
+		)
 	}
 
 	it('clamps on write, so no call site can persist an out-of-range value', async () => {
@@ -186,11 +263,8 @@ describe('range enforcement at the storage boundary', () => {
 		})
 
 		await setVideoSetting('abc', { semitones: 4 })
-		const stored = (await fakeBrowser.storage.local.get('videoSettings')).videoSettings as Record<
-			string,
-			unknown
-		>
-		expect(stored.abc).toEqual({ enabled: true, semitones: 4, tempo: 1 })
+		const stored = await fakeBrowser.storage.local.get('video:abc')
+		expect(stored['video:abc']).toEqual({ enabled: true, semitones: 4, tempo: 1 })
 	})
 
 	it('backfills a legacy entry that predates a field', async () => {
@@ -212,6 +286,12 @@ describe('range enforcement at the storage boundary', () => {
 			semitones: 3,
 			tempo: DEFAULT_VIDEO_SETTING.tempo,
 		})
+	})
+
+	it('treats a value that is not an entry as no entry', async () => {
+		await seedRaw({ abc: 'garbage', def: null })
+		expect(await getRawVideoSetting('abc')).toBeUndefined()
+		expect(await listVideoSettings()).toEqual({})
 	})
 
 	it('resolveSetting yields applied values that are always in range', async () => {

@@ -18,6 +18,7 @@ import {
 	listVideoSettings,
 	removeVideoSetting,
 	clearVideoSettings,
+	watchVideoSettings,
 } from '@/lib/storage'
 
 function App() {
@@ -45,8 +46,11 @@ function App() {
 		// One re-read per change rather than per-item watchers writing individual
 		// signals: this page is edited rarely, three extra storage reads cost nothing,
 		// and a single path means the displayed state always comes from storage.
-		const keys = ['local:globalEnabled', 'local:audioQuality', 'local:videoSettings'] as const
-		const unwatchers = keys.map((key) => storage.watch(key, () => void reload(`${key} changed`)))
+		const keys = ['local:globalEnabled', 'local:audioQuality'] as const
+		const unwatchers = [
+			...keys.map((key) => storage.watch(key, () => void reload(`${key} changed`))),
+			watchVideoSettings(() => void reload('video settings changed')),
+		]
 		return () => unwatchers.forEach((off) => off())
 	}, [])
 

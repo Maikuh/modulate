@@ -12,7 +12,13 @@ import {
 	type PlayerState,
 } from '@/lib/messaging'
 import { DEFAULT_VIDEO_SETTING, NO_OP, resolveSetting, type ResolvedSetting } from '@/lib/settings'
-import { globalEnabled, getAudioQuality, getRawVideoSetting, setVideoSetting } from '@/lib/storage'
+import {
+	globalEnabled,
+	getAudioQuality,
+	getRawVideoSetting,
+	setVideoSetting,
+	watchVideoSettings,
+} from '@/lib/storage'
 import { getVideoId, getVideoTitle } from '@/lib/youtube'
 
 export default defineContentScript({
@@ -261,10 +267,14 @@ export default defineContentScript({
 			}
 		}, 1000)
 
-		// Re-apply when settings change elsewhere (the options page edits storage
-		// directly), so the active tab reflects edits live.
+		// Re-apply when settings change elsewhere (another tab, the options page edits
+		// storage directly), so the active tab reflects edits live. Only this tab's
+		// own video matters: a write for any other video changes nothing here.
 		const unwatchers = [
-			storage.watch('local:videoSettings', () => scheduleApply('videoSettings')),
+			watchVideoSettings((ids) => {
+				const videoId = getVideoId(location.href)
+				if (videoId && ids.includes(videoId)) scheduleApply('videoSettings')
+			}),
 			storage.watch('local:audioQuality', () => scheduleApply('audioQuality')),
 			storage.watch('local:globalEnabled', () => scheduleApply('globalEnabled')),
 		]

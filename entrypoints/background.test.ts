@@ -3,6 +3,7 @@ import { fakeBrowser } from 'wxt/testing/fake-browser'
 
 import type { BadgeMessage } from '@/lib/messaging'
 import { TEMPO_STEP } from '@/lib/settings'
+import { getRawVideoSetting } from '@/lib/storage'
 
 import background from './background'
 
@@ -202,5 +203,21 @@ describe('background — keyboard commands', () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 		await expect(commandListener?.('modulate-pitch-up')).resolves.not.toThrow()
 		expect(warn).toHaveBeenCalled()
+	})
+})
+
+describe('background — storage migration', () => {
+	// Pre-1.4 installs keep every video in one object; the background moves them to
+	// one key per video whenever it starts.
+	it('moves legacy video settings to per-video keys on start', async () => {
+		fakeBrowser.reset()
+		installStubs()
+		await fakeBrowser.storage.local.set({ videoSettings: { abc: { semitones: 3 } } })
+
+		background.main()
+		await vi.waitFor(async () =>
+			expect(await getRawVideoSetting('abc')).toMatchObject({ semitones: 3 }),
+		)
+		expect(await fakeBrowser.storage.local.get('videoSettings')).toEqual({})
 	})
 })
