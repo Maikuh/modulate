@@ -18,7 +18,7 @@ type InterpolationKernel = NonNullable<InterpolationStrategyRegistration['kernel
  * It is also several times cheaper per sample: the stock kernel evaluates two
  * `Math.sin` per tap per channel, while this one reads its weights from a table.
  * (Under the stock stage order that alone cut the per-window CPU spike that cracks
- * on Firefox by ~3×; `TransposeFirstPipe` removes the spike itself.)
+ * on Firefox by ~3×; `PacedPipe` spreads out what is left of it.)
  *
  * Kernels aren't told the rate, so it is inferred: the transposer calls the kernel
  * at positions exactly `rate` apart (channel 0 then channel 1 at each position), so
