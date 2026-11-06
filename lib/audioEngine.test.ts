@@ -629,7 +629,7 @@ describe('AudioEngine — graph lifecycle', () => {
 describe('AudioEngine — quality', () => {
 	it('applies the stored quality at build time', async () => {
 		const engine = await freshEngine()
-		engine.applyQuality({ overlapMs: 30, quickSeek: false })
+		engine.applyQuality({ overlapMs: 30, quickSeek: false, engine: 'soundtouch' })
 
 		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
 
@@ -644,7 +644,7 @@ describe('AudioEngine — quality', () => {
 		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
 		currentWorklet().setStretchParameters.mockClear()
 
-		engine.applyQuality({ overlapMs: 5, quickSeek: true })
+		engine.applyQuality({ overlapMs: 5, quickSeek: true, engine: 'soundtouch' })
 
 		expect(currentWorklet().setStretchParameters).toHaveBeenCalledWith({
 			overlapMs: 5,

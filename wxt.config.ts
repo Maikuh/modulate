@@ -51,7 +51,7 @@ export default defineConfig({
 		},
 		web_accessible_resources: [
 			{
-				resources: ['soundtouch-processor.js', 'injected.js'],
+				resources: ['soundtouch-processor.js', 'signalsmith-processor.js', 'injected.js'],
 				matches: ['*://*.youtube.com/*'],
 			},
 		],

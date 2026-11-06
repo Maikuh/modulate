@@ -12,14 +12,20 @@
  * so the MAIN-world injected bundle can import the defaults without pulling
  * `storage.ts` — which touches extension APIs unavailable in the page realm.
  */
+/** SPIKE — which worklet does the shifting (see `lib/shifters.ts`). */
+export type EngineKind = 'soundtouch' | 'signalsmith'
+export const ENGINE_KINDS: readonly EngineKind[] = ['soundtouch', 'signalsmith']
+
 export interface AudioQuality {
 	overlapMs: number
 	quickSeek: boolean
+	engine: EngineKind
 }
 
 export const DEFAULT_AUDIO_QUALITY: Readonly<AudioQuality> = Object.freeze({
 	overlapMs: 12,
 	quickSeek: true,
+	engine: 'soundtouch',
 })
 
 /**
@@ -50,5 +56,8 @@ export function normalizeQuality(raw: unknown): AudioQuality {
 	return {
 		overlapMs: clampOverlapMs(typeof q.overlapMs === 'number' ? q.overlapMs : Number.NaN),
 		quickSeek: q.quickSeek !== false,
+		engine: ENGINE_KINDS.includes(q.engine as EngineKind)
+			? (q.engine as EngineKind)
+			: DEFAULT_AUDIO_QUALITY.engine,
 	}
 }

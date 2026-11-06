@@ -7,6 +7,7 @@ import {
 	MIN_OVERLAP_MS,
 	MAX_OVERLAP_MS,
 	type AudioQuality,
+	type EngineKind,
 } from '@/lib/audioQuality'
 import { formatSemitones } from '@/lib/format'
 import { Logo, PowerIcon, SlidersIcon, FilmIcon, TrashIcon } from '@/lib/icons'
@@ -209,6 +210,24 @@ function App() {
 								<span className="toggle__thumb" />
 							</span>
 						</label>
+					</div>
+
+					<div className="row">
+						<div className="row__text">
+							<span className="row__label">Engine (spike)</span>
+							<span className="row__desc">
+								SoundTouch (WSOLA) or Signalsmith Stretch. Switches live on open videos.
+							</span>
+						</div>
+						<select
+							className="btn"
+							aria-label="Engine"
+							value={quality.value.engine}
+							onChange={(e) => patchQuality({ engine: e.currentTarget.value as EngineKind })}
+						>
+							<option value="soundtouch">SoundTouch</option>
+							<option value="signalsmith">Signalsmith</option>
+						</select>
 					</div>
 
 					<div className="row">

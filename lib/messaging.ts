@@ -19,7 +19,12 @@
  * (it pulls only the side-effect-free `settings` and `audioQuality` modules).
  */
 
-import { clampOverlapMs, type AudioQuality } from '@/lib/audioQuality'
+import {
+	ENGINE_KINDS,
+	clampOverlapMs,
+	type AudioQuality,
+	type EngineKind,
+} from '@/lib/audioQuality'
 import { clampSemitones, clampTempo, type ResolvedSetting } from '@/lib/settings'
 
 export type PopupMessage =
@@ -128,6 +133,7 @@ export function parseApplyMessage(raw: string): ApplyMessage | null {
 	if (!isFiniteNumber(m.tempo)) return reject('tempo')
 	if (!isFiniteNumber(m.overlapMs)) return reject('overlapMs')
 	if (typeof m.quickSeek !== 'boolean') return reject('quickSeek')
+	if (!ENGINE_KINDS.includes(m.engine as EngineKind)) return reject('engine')
 
 	return {
 		source: 'modulate',
@@ -137,6 +143,7 @@ export function parseApplyMessage(raw: string): ApplyMessage | null {
 		tempo: clampTempo(m.tempo),
 		overlapMs: clampOverlapMs(m.overlapMs),
 		quickSeek: m.quickSeek,
+		engine: m.engine as EngineKind,
 	}
 }
 

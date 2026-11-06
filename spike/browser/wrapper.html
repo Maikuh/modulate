@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Shifter wrapper check</title>
+<h1>Shifter wrapper check</h1>
+<button id="run">Run</button>
+<pre id="out">idle</pre>
+<script type="module">
+	import { createShifter } from './shifters.js'
+	const SR = 48000
+	const out = document.getElementById('out')
+	const log = (s) => (out.textContent += '\n' + s)
+	const processorUrl = new URL('/soundtouch-processor.js', location.href).href
+	const quality = { overlapMs: 12, quickSeek: true }
+
+	async function check(kind, semitones, tempo) {
+		const ctx = new OfflineAudioContext({ numberOfChannels: 2, length: SR * 4, sampleRate: SR })
+		const shifter = await createShifter(kind, ctx, processorUrl, { ...quality, engine: kind })
+		shifter.set(semitones, tempo)
+		shifter.setActive(true)
+		// The element would resample raw at `tempo`: pitch scaled by it.
+		const osc = new OscillatorNode(ctx, { type: 'sawtooth', frequency: 196 * tempo })
+		const g = new GainNode(ctx, { gain: 0.2 })
+		osc.connect(g).connect(shifter.node).connect(ctx.destination)
+		osc.start()
+		// Let the port messages land before rendering starts.
+		await new Promise((r) => setTimeout(r, 50))
+		const buf = await ctx.startRendering()
+		const d = buf.getChannelData(0).subarray(SR * 2)
+		// Fundamental via autocorrelation peak in 40–1000 Hz.
+		const ac = []
+		const lo = Math.floor(SR / 1000)
+		for (let lag = lo; lag < SR / 40; lag++) {
+			let s = 0
+			for (let i = 0; i < 8192; i++) s += d[i] * d[i + lag]
+			ac[lag] = s
+		}
+		const max = Math.max(...ac.slice(lo))
+		// First local peak near the max: the period, not a multiple of it.
+		let bestLag = lo
+		for (let lag = lo + 1; lag < ac.length - 1; lag++) {
+			if (ac[lag] > 0.9 * max && ac[lag] >= ac[lag - 1] && ac[lag] >= ac[lag + 1]) {
+				bestLag = lag
+				break
+			}
+		}
+		const f = SR / bestLag
+		const want = 196 * 2 ** (semitones / 12)
+		log(
+			`${kind.padEnd(12)} ${String(semitones).padStart(3)} st ${tempo}×  →  ${f.toFixed(1)} Hz (want ${want.toFixed(1)})  ${Math.abs(f / want - 1) < 0.02 ? 'OK' : 'MISMATCH'}`,
+		)
+	}
+
+	document.getElementById('run').onclick = async () => {
+		out.textContent = 'running…'
+		try {
+			for (const kind of ['soundtouch', 'signalsmith'])
+				for (const [st, tempo] of [
+					[5, 1],
+					[-7, 1],
+					[5, 1.5],
+					[12, 0.75],
+				])
+					await check(kind, st, tempo)
+			log('done')
+		} catch (e) {
+			log('ERROR ' + (e?.stack || e))
+		}
+	}
+</script>

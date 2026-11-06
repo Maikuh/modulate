@@ -14,6 +14,7 @@ vi.mock('@/lib/audioEngine', () => ({
 		attach: vi.fn(),
 		captures: vi.fn(),
 		ensureGraph: vi.fn().mockResolvedValue(undefined),
+		syncShifter: vi.fn().mockResolvedValue(undefined),
 		applyQuality: vi.fn(),
 		apply: vi.fn(),
 		resume: vi.fn().mockResolvedValue(undefined),
@@ -50,6 +51,7 @@ function message(overrides: Partial<ApplyMessage> = {}): ApplyMessage {
 		tempo: 1,
 		overlapMs: 12,
 		quickSeek: true,
+		engine: 'soundtouch',
 		...overrides,
 	}
 }

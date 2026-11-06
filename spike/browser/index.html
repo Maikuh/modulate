@@ -1,0 +1,110 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Signalsmith spike — browser bench</title>
+<style>
+	body {
+		font:
+			14px system-ui,
+			sans-serif;
+		margin: 16px;
+	}
+	pre {
+		background: #f4f4f4;
+		padding: 8px;
+	}
+</style>
+<h1>Worklet render bench</h1>
+<p>
+	Renders 20 s of a sawtooth (+5 st) through each engine in an OfflineAudioContext and times it.
+</p>
+<button id="run">Run</button>
+<pre id="out">idle</pre>
+<script type="module">
+	import SignalsmithStretch from './SignalsmithStretch.mjs'
+
+	// The extension would point this at its own web-accessible file; the default is
+	// a Blob URL, which YouTube's CSP would refuse.
+	SignalsmithStretch.moduleUrl = new URL('./SignalsmithStretch.mjs', location.href).href
+
+	const SR = 48000
+	const SECONDS = 20
+	const out = document.getElementById('out')
+	const log = (s) => (out.textContent += '\n' + s)
+
+	function source(ctx) {
+		const osc = new OscillatorNode(ctx, { type: 'sawtooth', frequency: 196 })
+		const gain = new GainNode(ctx, { gain: 0.2 })
+		osc.connect(gain)
+		osc.start()
+		return gain
+	}
+
+	async function render(name, build) {
+		const ctx = new OfflineAudioContext({
+			numberOfChannels: 2,
+			length: SR * SECONDS,
+			sampleRate: SR,
+		})
+		const t0 = performance.now()
+		const node = await build(ctx)
+		const tBuild = performance.now() - t0
+		const src = source(ctx)
+		if (node) {
+			src.connect(node)
+			node.connect(ctx.destination)
+		} else src.connect(ctx.destination)
+		const t1 = performance.now()
+		const buf = await ctx.startRendering()
+		const ms = performance.now() - t1
+		const data = buf.getChannelData(0)
+		let peak = 0
+		let sq = 0
+		for (let i = SR * 2; i < data.length; i++) {
+			peak = Math.max(peak, Math.abs(data[i]))
+			sq += data[i] * data[i]
+		}
+		const rms = Math.sqrt(sq / (data.length - SR * 2))
+		log(
+			`${name.padEnd(28)} setup ${tBuild.toFixed(0).padStart(4)} ms   render ${ms.toFixed(0).padStart(5)} ms   ${((SECONDS * 1000) / ms).toFixed(0).padStart(4)}× realtime   peak ${peak.toFixed(3)}   rms ${rms.toFixed(3)}`,
+		)
+		return ms
+	}
+
+	async function signalsmith(ctx, config) {
+		const node = await SignalsmithStretch(ctx)
+		if (config) await node.configure(config)
+		await node.schedule({ active: true, semitones: 5, output: 0 })
+		log(`  (signalsmith latency ${(1000 * (await node.latency())).toFixed(1)} ms)`)
+		return node
+	}
+
+	document.getElementById('run').onclick = async () => {
+		out.textContent = 'running…'
+		try {
+			for (let round = 0; round < 2; round++) {
+				log(`-- round ${round + 1}`)
+				await render('passthrough', async () => null)
+				await render('SoundTouch (current)', async (ctx) => {
+					await ctx.audioWorklet.addModule('./soundtouch-processor.js')
+					const node = new AudioWorkletNode(ctx, 'soundtouch-processor', {
+						numberOfInputs: 1,
+						numberOfOutputs: 1,
+						outputChannelCount: [2],
+					})
+					node.parameters.get('pitchSemitones').value = 5
+					return node
+				})
+				await render('Signalsmith default', (ctx) => signalsmith(ctx, null))
+				await render('Signalsmith 120 ms split', (ctx) =>
+					signalsmith(ctx, { blockMs: 120, intervalMs: 30, splitComputation: true }),
+				)
+				await render('Signalsmith 90 ms split', (ctx) =>
+					signalsmith(ctx, { blockMs: 90, intervalMs: 22.5, splitComputation: true }),
+				)
+			}
+			log('done')
+		} catch (err) {
+			log('ERROR: ' + (err?.stack || err))
+		}
+	}
+</script>

@@ -12,6 +12,7 @@ const valid: ApplyMessage = {
 	tempo: 1.25,
 	overlapMs: 12,
 	quickSeek: true,
+	engine: 'soundtouch',
 }
 
 const parse = (m: unknown) => parseApplyMessage(JSON.stringify(m))

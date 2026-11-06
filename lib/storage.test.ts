@@ -330,13 +330,18 @@ describe('audio quality at the storage boundary', () => {
 		expect(await getAudioQuality()).toEqual({
 			overlapMs: DEFAULT_AUDIO_QUALITY.overlapMs,
 			quickSeek: false,
+			engine: 'soundtouch',
 		})
 	})
 
 	// v1.1.1's slider went down to 0, which SoundTouch silently ignores.
 	it('lifts a legacy overlap of 0 to the floor on read', async () => {
 		await seedRaw({ overlapMs: 0, quickSeek: true })
-		expect(await getAudioQuality()).toEqual({ overlapMs: MIN_OVERLAP_MS, quickSeek: true })
+		expect(await getAudioQuality()).toEqual({
+			overlapMs: MIN_OVERLAP_MS,
+			quickSeek: true,
+			engine: 'soundtouch',
+		})
 	})
 
 	it('replaces non-numeric and non-object values', async () => {
@@ -348,10 +353,8 @@ describe('audio quality at the storage boundary', () => {
 
 	it('clamps on write and merges a partial', async () => {
 		await setAudioQuality({ quickSeek: false })
-		expect(await setAudioQuality({ overlapMs: 500 })).toEqual({
-			overlapMs: MAX_OVERLAP_MS,
-			quickSeek: false,
-		})
-		expect(await getAudioQuality()).toEqual({ overlapMs: MAX_OVERLAP_MS, quickSeek: false })
+		const expected = { overlapMs: MAX_OVERLAP_MS, quickSeek: false, engine: 'soundtouch' }
+		expect(await setAudioQuality({ overlapMs: 500 })).toEqual(expected)
+		expect(await getAudioQuality()).toEqual(expected)
 	})
 })

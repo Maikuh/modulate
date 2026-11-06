@@ -254,6 +254,7 @@ export default defineUnlistedScript(() => {
 		audioEngine.applyQuality({
 			overlapMs: msg.overlapMs,
 			quickSeek: msg.quickSeek,
+			engine: msg.engine,
 		})
 		// The autoplay policy already refused this page; don't ask again until the
 		// page sees a gesture. Once a graph exists, re-applies never ask at all.
@@ -275,6 +276,9 @@ export default defineUnlistedScript(() => {
 				hookGesture()
 				return dirty ? null : waitNatively(el, msg)
 			}
+			if (dirty) return null
+			// SPIKE: swap the worklet in place when the options page switched engines.
+			await audioEngine.syncShifter(msg.processorUrl)
 			if (dirty) return null
 		} else {
 			audioEngine.attach(el)

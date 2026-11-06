@@ -25,3 +25,6 @@ web-ext.config.ts
 *.njsproj
 *.sln
 *.sw?
+# Generated: rebuild with `bun run build`, then see spike/README.md
+spike/browser/*.js
+spike/browser/*.mjs

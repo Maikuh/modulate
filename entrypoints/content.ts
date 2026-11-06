@@ -122,6 +122,7 @@ export default defineContentScript({
 				tempo: setting.tempo,
 				overlapMs: quality.overlapMs,
 				quickSeek: quality.quickSeek,
+				engine: quality.engine,
 			}
 			// JSON string payload: primitives cross the content/page membrane without
 			// `cloneInto`; a raw object would arrive as `null` in the page realm.

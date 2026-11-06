@@ -200,6 +200,7 @@ describe('content script', () => {
 			tempo: 1.5,
 			overlapMs: expect.any(Number),
 			quickSeek: expect.any(Boolean),
+			engine: 'soundtouch',
 		})
 		cs.stop()
 	})

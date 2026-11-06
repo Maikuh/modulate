@@ -1,9 +1,8 @@
-import { SoundTouchNode } from '@soundtouchjs/audio-worklet'
-
 // Side-effect-free modules — safe to pull into the MAIN-world bundle, unlike
 // `storage.ts` which touches extension APIs unavailable in the page realm.
 import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality'
 import type { ResolvedSetting } from '@/lib/settings'
+import { createShifter, type Shifter } from '@/lib/shifters'
 
 /**
  * Owns the Web Audio graph that pitch-shifts and time-stretches a single media
@@ -67,7 +66,9 @@ export class AudioBlockedError extends Error {
 class AudioEngine {
 	private ctx: AudioContext | null = null
 	private source: MediaElementAudioSourceNode | null = null
-	private node: SoundTouchNode | null = null
+	private node: Shifter | null = null
+	/** SPIKE: an in-flight worklet swap (`syncShifter`). */
+	private swapping: Promise<void> | null = null
 	/** The element the graph captured; `null` while there is no graph. */
 	private graphElement: HTMLMediaElement | null = null
 	/**
@@ -180,7 +181,7 @@ class AudioEngine {
 		// the URL poll, three storage watchers), leaking one per attempt would burn
 		// through the cap in seconds and take audio down for the rest of the page.
 		this.ctx = ctx
-		let node: SoundTouchNode
+		let node: Shifter
 		let source: MediaElementAudioSourceNode
 		try {
 			// Ask the autoplay policy before anything irreversible. A context that won't
@@ -192,15 +193,7 @@ class AudioEngine {
 			await this.resume(START_TIMEOUT_MS)
 			if (ctx.state !== 'running') throw new AudioBlockedError()
 
-			await SoundTouchNode.register(ctx, processorUrl)
-
-			node = new SoundTouchNode({ context: ctx })
-			// Apply the user-tunable WSOLA timing. `quickSeek: false` runs the full
-			// cross-correlation search per overlap-add splice instead of the fast
-			// approximation; a wider `overlapMs` lengthens the crossfade between splices,
-			// hiding discontinuities. Tradeoff is CPU and a touch more smearing — exposed
-			// in the options page so users can trade artifacts against CPU.
-			node.setStretchParameters(this.quality)
+			node = await createShifter(this.quality.engine, ctx, processorUrl, this.quality)
 			source = ctx.createMediaElementSource(el)
 		} catch (err) {
 			await this.disposeGraph()
@@ -224,13 +217,50 @@ class AudioEngine {
 			base: ctx.baseLatency,
 			output: ctx.outputLatency,
 		})
-		node.addEventListener('processorerror', (event) => {
-			if (this.node !== node) return
+		this.watchCrash(node)
+		this.route()
+	}
+
+	/**
+	 * A crashed worklet outputs silence forever, so route around it until an element
+	 * swap (or, in the spike, an engine switch) brings a fresh one.
+	 */
+	private watchCrash(shifter: Shifter): void {
+		shifter.node.addEventListener('processorerror', (event) => {
+			if (this.node !== shifter) return
 			console.error('[modulate] audio worklet crashed; bypassing it', event)
 			this.failed = true
 			this.route()
 		})
-		this.route()
+	}
+
+	/**
+	 * SPIKE: swap the worklet for the engine `applyQuality` last asked for, inside
+	 * the live context — the element stays captured, only the node between source
+	 * and destination changes. No-op without a graph (the build picks the engine).
+	 */
+	async syncShifter(processorUrl: string): Promise<void> {
+		while (this.swapping) await this.swapping
+		const ctx = this.ctx
+		if (!ctx || !this.node || this.node.kind === this.quality.engine) return
+		this.swapping = (async () => {
+			const next = await createShifter(this.quality.engine, ctx, processorUrl, this.quality)
+			if (this.ctx !== ctx || !this.node) {
+				next.node.disconnect()
+				return
+			}
+			const old = this.node
+			this.node = next
+			this.failed = false
+			this.watchCrash(next)
+			old.setActive(false)
+			old.node.disconnect()
+			this.route()
+			console.info(`[modulate] switched engine to ${next.kind}`)
+		})().finally(() => {
+			this.swapping = null
+		})
+		await this.swapping
 	}
 
 	/**
@@ -243,7 +273,8 @@ class AudioEngine {
 	private route(): void {
 		if (!this.ctx || !this.source || !this.node) return
 		this.source.disconnect()
-		this.node.disconnect()
+		this.node.node.disconnect()
+		this.node.setActive(!this.bypassed)
 		try {
 			if (this.bypassed) {
 				// Tempo goes native (pitch preserved by the element); the worklet's params
@@ -252,8 +283,8 @@ class AudioEngine {
 				this.source.connect(this.ctx.destination)
 			} else {
 				this.applyLive()
-				this.source.connect(this.node)
-				this.node.connect(this.ctx.destination)
+				this.source.connect(this.node.node)
+				this.node.node.connect(this.ctx.destination)
 			}
 		} catch (err) {
 			// Never leave the source stranded between the disconnect above and a
@@ -282,8 +313,7 @@ class AudioEngine {
 			this.applyNativeRate()
 			return
 		}
-		this.node.pitchSemitones.value = this.semitones
-		this.node.playbackRate.value = this.tempo
+		this.node.set(this.semitones, this.tempo)
 		if (!this.element) return
 
 		if (this.tempo === 1) {
@@ -388,7 +418,7 @@ class AudioEngine {
 	/** Update the WSOLA tuning, live if the graph already exists. */
 	applyQuality(quality: AudioQuality): void {
 		this.quality = quality
-		this.node?.setStretchParameters(quality)
+		this.node?.setQuality(quality)
 	}
 
 	/**
@@ -427,7 +457,7 @@ class AudioEngine {
 	 * does not release the captured element.
 	 */
 	private async disposeGraph(): Promise<void> {
-		this.node?.disconnect()
+		this.node?.node.disconnect()
 		this.source?.disconnect()
 		const ctx = this.ctx
 		this.ctx = null
