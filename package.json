@@ -24,7 +24,8 @@
 	},
 	"dependencies": {
 		"@preact/signals": "^2.9.1",
-		"@soundtouchjs/audio-worklet": "^2.0.3",
+		"@soundtouchjs/audio-worklet": "^2.1.1",
+		"@soundtouchjs/worklet-base": "^2.1.1",
 		"preact": "^10.29.2"
 	},
 	"devDependencies": {
