@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-import type { ApplyMessage } from '@/lib/messaging'
+import { APPLY_EVENT, STATUS_EVENT, type ApplyMessage } from '@/lib/messaging'
 
 // The real engine needs an AudioContext, which happy-dom does not implement. These
 // tests are about the MAIN-world script's own logic — what it decides to call, and
@@ -55,17 +55,25 @@ function message(overrides: Partial<ApplyMessage> = {}): ApplyMessage {
 }
 
 /**
- * Deliver a payload as the content script does — a JSON string from the page's
- * own window.
- *
- * Dispatched rather than `window.postMessage`d because happy-dom leaves
- * `event.source` null on a self-post, and the listener's first guard is
- * `event.source !== window`. Real browsers set it; the harness does not.
+ * The channel the running instance listens on: the `<script>` element its content
+ * script injected it with.
  */
-async function post(msg: unknown): Promise<void> {
-	const data = typeof msg === 'string' ? msg : JSON.stringify(msg)
-	window.dispatchEvent(new MessageEvent('message', { data, source: window }))
+let channel: HTMLElement
+
+/** Deliver a payload as the content script does — a JSON string over the channel. */
+async function post(msg: unknown, to: EventTarget = channel): Promise<void> {
+	const detail = typeof msg === 'string' ? msg : JSON.stringify(msg)
+	to.dispatchEvent(new CustomEvent(APPLY_EVENT, { detail }))
 	await tick()
+}
+
+/** Statuses posted back for the content script, in order. */
+function collectStatuses(target: EventTarget = channel): string[] {
+	const seen: string[] = []
+	target.addEventListener(STATUS_EVENT, (e) => {
+		seen.push((JSON.parse((e as CustomEvent<string>).detail) as { status: string }).status)
+	})
+	return seen
 }
 
 async function tick(times = 6) {
@@ -85,7 +93,7 @@ async function tick(times = 6) {
  */
 let teardown: Array<() => void> = []
 let recording: { mockRestore(): void } | null = null
-function start() {
+function start(script: HTMLElement = document.createElement('script')): HTMLElement {
 	if (!recording) {
 		const added = window.addEventListener.bind(window)
 		recording = vi
@@ -95,7 +103,15 @@ function start() {
 				added(type, fn, opts)
 			})
 	}
-	injected.main()
+	// Only set while a script executes; the instance reads it synchronously at start.
+	Object.defineProperty(document, 'currentScript', { value: script, configurable: true })
+	try {
+		injected.main()
+	} finally {
+		Reflect.deleteProperty(document, 'currentScript')
+	}
+	channel ??= script
+	return script
 }
 
 /** Put a player element on the page. */
@@ -123,6 +139,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	Reflect.deleteProperty(window, INSTANCE_KEY)
+	channel = undefined as unknown as HTMLElement
 	recording?.mockRestore()
 	recording = null
 	teardown.forEach((off) => off())
@@ -259,6 +276,7 @@ describe('injected script — media lifecycle replay', () => {
 		teardown.forEach((off) => off())
 		teardown = []
 		Reflect.deleteProperty(window, INSTANCE_KEY)
+		channel = undefined as unknown as HTMLElement
 		vi.clearAllMocks()
 		const fresh = mountVideo()
 		start()
@@ -394,11 +412,7 @@ describe('injected script — autoplay gate', () => {
 		mountVideo()
 		start()
 		const seen: string[] = []
-		const onMessage = (e: MessageEvent) => {
-			if (typeof e.data === 'string' && e.data.includes('modulate-page')) seen.push(e.data)
-		}
-		window.addEventListener('message', onMessage)
-		teardown.push(() => window.removeEventListener('message', onMessage))
+		channel.addEventListener(STATUS_EVENT, (e) => seen.push((e as CustomEvent<string>).detail))
 
 		await post(message({ semitones: 4 }))
 		window.dispatchEvent(new Event('pointerdown'))
@@ -539,11 +553,8 @@ describe('injected script — waiting for the player', () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 		try {
 			start()
-			window.dispatchEvent(
-				new MessageEvent('message', {
-					data: JSON.stringify(message({ semitones: 2 })),
-					source: window,
-				}),
+			channel.dispatchEvent(
+				new CustomEvent(APPLY_EVENT, { detail: JSON.stringify(message({ semitones: 2 })) }),
 			)
 			await vi.advanceTimersByTimeAsync(10_000)
 
@@ -600,6 +611,31 @@ describe('injected script — pagehide', () => {
 	})
 })
 
+describe('injected script — channel', () => {
+	// window.postMessage is readable and forgeable by every script in the page.
+	it('ignores apply messages posted page-wide', async () => {
+		mountVideo()
+		start()
+
+		window.dispatchEvent(
+			new MessageEvent('message', {
+				data: JSON.stringify(message({ semitones: 2 })),
+				source: window,
+			}),
+		)
+		await tick()
+
+		expect(engine.ensureGraph).not.toHaveBeenCalled()
+	})
+
+	it('stays quiet without a <script> to talk over', () => {
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+		injected.main()
+		expect(error).toHaveBeenCalledWith(expect.stringContaining('without a <script>'))
+		expect(Reflect.get(window, INSTANCE_KEY)).toBeUndefined()
+	})
+})
+
 describe('injected script — single instance', () => {
 	// A second copy (Firefox re-injects on update) could never capture the element
 	// the first one already owns, and would churn a context on every trigger.
@@ -612,21 +648,23 @@ describe('injected script — single instance', () => {
 
 		expect(engine.ensureGraph).toHaveBeenCalledOnce()
 	})
+
+	// The new content script talks over its own <script>; the instance that owns the
+	// element must hear it, and answer there.
+	it("hands a later copy's channel to the running instance", async () => {
+		mountVideo()
+		start()
+		const second = start()
+		const seen = collectStatuses(second)
+
+		await post(message({ semitones: 3 }), second)
+
+		expect(engine.apply).toHaveBeenCalledWith({ semitones: 3, tempo: 1 })
+		expect(seen).toEqual(['applied'])
+	})
 })
 
 describe('injected script — status reports', () => {
-	/** Statuses posted back for the content script, in order. */
-	function collectStatuses(): string[] {
-		const seen: string[] = []
-		const onMessage = (e: MessageEvent) => {
-			if (typeof e.data !== 'string' || !e.data.includes('modulate-page')) return
-			seen.push((JSON.parse(e.data) as { status: string }).status)
-		}
-		window.addEventListener('message', onMessage)
-		teardown.push(() => window.removeEventListener('message', onMessage))
-		return seen
-	}
-
 	it('reports applied once the settings are live', async () => {
 		mountVideo()
 		start()

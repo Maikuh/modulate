@@ -3,7 +3,14 @@ import { fakeBrowser } from 'wxt/testing/fake-browser'
 import { ContentScriptContext } from 'wxt/utils/content-script-context'
 
 import { DEFAULT_AUDIO_QUALITY } from '@/lib/audioQuality'
-import type { ApplyMessage, PlayerState, PopupMessage, PopupResponse } from '@/lib/messaging'
+import {
+	APPLY_EVENT,
+	STATUS_EVENT,
+	type ApplyMessage,
+	type PlayerState,
+	type PopupMessage,
+	type PopupResponse,
+} from '@/lib/messaging'
 import { TEMPO_STEP } from '@/lib/settings'
 import { globalEnabled, setAudioQuality, setVideoSetting, getRawVideoSetting } from '@/lib/storage'
 
@@ -34,10 +41,14 @@ function setUrl(url: string): void {
 async function startContentScript() {
 	const ctx = new ContentScriptContext('test')
 	const posted: string[] = []
-	const onPost = (e: MessageEvent) => {
-		if (typeof e.data === 'string') posted.push(e.data)
+	// Anything on the page-wide channel would be readable by every page script.
+	// (WXT's own context posts an object there to detect duplicate scripts; ours
+	// were always JSON strings.)
+	const broadcast: unknown[] = []
+	const onBroadcast = (e: MessageEvent) => {
+		if (typeof e.data === 'string') broadcast.push(e.data)
 	}
-	window.addEventListener('message', onPost)
+	window.addEventListener('message', onBroadcast)
 
 	let injectedEl: HTMLElement | undefined
 	const createElement = document.createElement.bind(document)
@@ -53,22 +64,38 @@ async function startContentScript() {
 	spy.mockRestore()
 
 	if (!injectedEl) throw new Error('content script did not inject')
-	injectedEl.dispatchEvent(new Event('load'))
+	const channel = injectedEl
+	channel.addEventListener(APPLY_EVENT, (e) => {
+		const detail = (e as CustomEvent<unknown>).detail
+		posted.push(detail as string)
+	})
+	channel.dispatchEvent(new Event('load'))
 
 	await tick()
 	return {
 		ctx,
-		/** Every `ApplyMessage` posted to the page realm, parsed. */
+		/** The private channel: the injected `<script>` element. */
+		channel,
+		/** Every `ApplyMessage` sent to the page realm, parsed. */
 		applies: () => posted.map((raw) => JSON.parse(raw) as ApplyMessage),
 		/** Raw payloads, to assert on the wire format itself. */
 		raw: () => [...posted],
+		/** What was posted page-wide with `window.postMessage`. */
+		broadcast: () => [...broadcast],
+		/** Report a status from the page engine over the channel. */
+		status: (status: string) =>
+			channel.dispatchEvent(
+				new CustomEvent(STATUS_EVENT, {
+					detail: JSON.stringify({ source: 'modulate-page', type: 'status', status }),
+				}),
+			),
 		/** Clear both the posted payloads and the badge-message spy. */
 		reset: () => {
 			posted.length = 0
 			vi.mocked(browser.runtime.sendMessage).mockClear()
 		},
 		stop: () => {
-			window.removeEventListener('message', onPost)
+			window.removeEventListener('message', onBroadcast)
 			ctx.notifyInvalidated()
 		},
 	}
@@ -146,6 +173,18 @@ describe('content script', () => {
 			type: 'apply',
 			semitones: 3,
 		})
+		cs.stop()
+	})
+
+	// window.postMessage reaches every script in the page; the injected <script>
+	// element is a channel only our two scripts hold.
+	it('sends nothing page-wide', async () => {
+		await setVideoSetting('vid1', { semitones: 3 })
+		const cs = await startContentScript()
+		await send({ type: 'NUDGE_SEMITONES', delta: 1 })
+
+		expect(cs.applies().length).toBeGreaterThan(0)
+		expect(cs.broadcast()).toEqual([])
 		cs.stop()
 	})
 
@@ -461,16 +500,7 @@ describe('content script', () => {
 			await setVideoSetting('vid1', { semitones: 3 })
 			const cs = await startContentScript()
 
-			window.dispatchEvent(
-				new MessageEvent('message', {
-					data: JSON.stringify({
-						source: 'modulate-page',
-						type: 'status',
-						status: 'waiting-for-gesture',
-					}),
-					source: window,
-				}),
-			)
+			cs.status('waiting-for-gesture')
 			await tick()
 
 			expect(browser.runtime.sendMessage).toHaveBeenLastCalledWith(

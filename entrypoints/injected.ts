@@ -1,5 +1,7 @@
 import { AudioBlockedError, audioEngine } from '@/lib/audioEngine'
 import {
+	APPLY_EVENT,
+	STATUS_EVENT,
 	parseApplyMessage,
 	type ApplyMessage,
 	type AudioStatus,
@@ -14,24 +16,41 @@ import { NO_OP, isNoOp } from '@/lib/settings'
  * `processorOptions` object into the page-realm worklet.
  *
  * The content script can't reach the page realm directly either, so it forwards
- * the resolved settings here via `window.postMessage` — pitch, tempo, the WSOLA
- * quality knobs, and the worklet URL (which only the content script can resolve,
- * having the extension APIs). The payload is a JSON string: primitives cross the
- * content/page membrane without `cloneInto`.
+ * the resolved settings here — pitch, tempo, the WSOLA quality knobs, and the
+ * worklet URL (which only the content script can resolve, having the extension
+ * APIs) — as `APPLY_EVENT`s on the `<script>` element that loaded this file, and
+ * hears back via `STATUS_EVENT`s on the same element. The payload is a JSON
+ * string: primitives cross the content/page membrane without `cloneInto`.
  */
-/** Page-realm marker for the instance that owns the audio graph. */
+/**
+ * Page-realm slot for the instance that owns the audio graph: a function that
+ * adopts another content script's channel.
+ */
 export const INSTANCE_KEY = Symbol.for('modulate.injected')
 
+type Adopt = (channel: EventTarget) => void
+
 export default defineUnlistedScript(() => {
+	// The <script> element that loaded us is the channel to our content script. Only
+	// readable now, while this file is executing synchronously.
+	const channel = document.currentScript
+	if (!channel) {
+		console.error('[modulate] loaded without a <script> element; cannot reach the extension')
+		return
+	}
+
 	// Firefox re-runs content scripts in open tabs when the extension updates, and
 	// the new content script injects this file again. The first instance owns the
 	// captured <video> — a second could never capture it, and would open and close a
-	// context on every trigger trying — so later copies stand down and leave the
-	// page to it (the old content script stood its engine down on invalidation, and
-	// the new one's messages reach the same listener).
-	const page = window as Window & { [INSTANCE_KEY]?: true }
-	if (page[INSTANCE_KEY]) return
-	page[INSTANCE_KEY] = true
+	// context on every trigger trying — so later copies hand their channel to it and
+	// stand down (the old content script stood its engine down on invalidation, and
+	// the new one's messages then reach the engine that owns the element).
+	const page = window as Window & { [INSTANCE_KEY]?: Adopt }
+	const running = page[INSTANCE_KEY]
+	if (typeof running === 'function') {
+		running(channel)
+		return
+	}
 
 	/** Find the player's media element (mounts late on first load). */
 	function findVideo(): HTMLVideoElement | null {
@@ -98,10 +117,17 @@ export default defineUnlistedScript(() => {
 		void drain()
 	}
 
+	/**
+	 * Every channel adopted so far. Reports go to all of them: the newest content
+	 * script is the one listening, and a dead one's element just drops the event.
+	 */
+	const channels = new Set<EventTarget>()
+
 	/** Tell the content script how the latest apply went (see `AudioStatus`). */
 	function report(status: AudioStatus): void {
 		const msg: StatusMessage = { source: 'modulate-page', type: 'status', status }
-		window.postMessage(JSON.stringify(msg), '*')
+		const detail = JSON.stringify(msg)
+		for (const ch of channels) ch.dispatchEvent(new CustomEvent(STATUS_EVENT, { detail }))
 	}
 
 	async function drain(): Promise<void> {
@@ -267,15 +293,24 @@ export default defineUnlistedScript(() => {
 		return 'applied'
 	}
 
-	window.addEventListener('message', (event) => {
-		if (event.source !== window || typeof event.data !== 'string') return
+	function onApply(event: Event): void {
+		const detail = (event as CustomEvent<unknown>).detail
+		if (typeof detail !== 'string') return
 
-		const msg = parseApplyMessage(event.data)
+		const msg = parseApplyMessage(detail)
 		if (!msg) return
 
 		lastMsg = msg
 		schedule()
-	})
+	}
+
+	const adopt: Adopt = (ch) => {
+		if (channels.has(ch)) return
+		channels.add(ch)
+		ch.addEventListener(APPLY_EVENT, onApply)
+	}
+	page[INSTANCE_KEY] = adopt
+	adopt(channel)
 
 	// Close the AudioContext on real unload only. Skipping bfcache (`persisted`)
 	// keeps the frozen graph intact for restore — and avoids re-capturing the same

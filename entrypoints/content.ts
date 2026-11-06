@@ -2,6 +2,8 @@ import { storage } from 'wxt/utils/storage'
 
 import { DEFAULT_AUDIO_QUALITY, type AudioQuality } from '@/lib/audioQuality'
 import {
+	APPLY_EVENT,
+	STATUS_EVENT,
 	logSendFailure,
 	parseStatusMessage,
 	type ApplyMessage,
@@ -31,22 +33,28 @@ export default defineContentScript({
 		// Inject the audio engine into the page's MAIN world. It can't live in this
 		// sandbox: Firefox throws DataCloneError when an AudioWorkletNode serializes
 		// a sandbox object into the page-realm worklet. Load via `src` (not inline)
-		// so YouTube's CSP doesn't block it.
+		// so YouTube's CSP doesn't block it — which is also why this isn't WXT's
+		// `injectScript`: on MV2 (our Firefox build) it inlines the script text.
+		//
+		// The element doubles as the private channel to the page script: we talk over
+		// CustomEvents dispatched on it, where `window.postMessage` would broadcast
+		// every message to every script in the page. It is removed from the DOM once
+		// loaded; events still dispatch on a detached element.
+		const channel = document.createElement('script')
 		const injected = new Promise<void>((resolve, reject) => {
-			const script = document.createElement('script')
-			script.src = browser.runtime.getURL('/injected.js')
-			script.addEventListener(
+			channel.src = browser.runtime.getURL('/injected.js')
+			channel.addEventListener(
 				'load',
 				() => {
-					script.remove()
+					channel.remove()
 					resolve()
 				},
 				{ once: true },
 			)
-			script.addEventListener('error', () => reject(new Error('failed to inject audio engine')), {
+			channel.addEventListener('error', () => reject(new Error('failed to inject audio engine')), {
 				once: true,
 			})
-			;(document.head ?? document.documentElement).append(script)
+			;(document.head ?? document.documentElement).append(channel)
 		})
 		injected.catch((err) => {
 			console.error('[modulate]', err)
@@ -73,9 +81,10 @@ export default defineContentScript({
 			browser.runtime.sendMessage(badge).catch((err) => logSendFailure('badge update dropped', err))
 		}
 
-		ctx.addEventListener(window, 'message', (event: MessageEvent) => {
-			if (event.source !== window || typeof event.data !== 'string') return
-			const status = parseStatusMessage(event.data)
+		ctx.addEventListener(channel, STATUS_EVENT, (event: Event) => {
+			const detail = (event as CustomEvent<unknown>).detail
+			if (typeof detail !== 'string') return
+			const status = parseStatusMessage(detail)
 			if (status) setAudioStatus(status)
 		})
 
@@ -111,7 +120,7 @@ export default defineContentScript({
 			}
 			// JSON string payload: primitives cross the content/page membrane without
 			// `cloneInto`; a raw object would arrive as `null` in the page realm.
-			window.postMessage(JSON.stringify(msg), '*')
+			channel.dispatchEvent(new CustomEvent(APPLY_EVENT, { detail: JSON.stringify(msg) }))
 		}
 
 		/** Resolve the effective pitch/tempo + quality and forward them to the engine. */

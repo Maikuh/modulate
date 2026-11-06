@@ -10,6 +10,10 @@
  * `PopupMessage`s to the active tab) and renders the toolbar badge (receiving a
  * `BadgeMessage` from the content script).
  *
+ * The content/page hop runs over the injected `<script>` element as a private
+ * channel (`APPLY_EVENT` / `STATUS_EVENT` CustomEvents carrying JSON strings),
+ * not `window.postMessage`, which every script in the page can read and forge.
+ *
  * Imported by the MAIN-world bundle, so it must stay free of extension APIs
  * (it pulls only the side-effect-free `settings` and `audioQuality` modules).
  */
@@ -61,9 +65,16 @@ export interface BadgeMessage {
 	status: AudioStatus
 }
 
+/** CustomEvent (on the injected `<script>`) carrying an `ApplyMessage` JSON string. */
+export const APPLY_EVENT = 'modulate:apply'
+/** CustomEvent (on the injected `<script>`) carrying a `StatusMessage` JSON string. */
+export const STATUS_EVENT = 'modulate:status'
+
 /**
- * Command posted from the content script to the main-world `injected` script
- * via `window.postMessage` (serialized to JSON — see `injected.ts` for why).
+ * Command sent from the content script to the main-world `injected` script as the
+ * `detail` of an `APPLY_EVENT`, serialized to JSON: a string crosses the
+ * content/page membrane in every browser, an object arrives as `null` in Firefox
+ * without `cloneInto` and in Chrome's isolated worlds.
  * Carries the effective pitch/tempo (already resolved against the toggles) and
  * the WSOLA time-stretch tuning for the worklet.
  */
@@ -78,10 +89,11 @@ export type ApplyMessage = {
 /**
  * Parse an inbound payload into an `ApplyMessage`, or null if it isn't one.
  *
- * Every field is checked, not just the discriminant. `event.source === window`
- * is not a trust boundary here: the listener runs in the MAIN world, which we
- * share with YouTube's own scripts and any other extension injecting there, so
- * a well-formed message can come from something that isn't our content script.
+ * Every field is checked, not just the discriminant. The private channel is not a
+ * trust boundary on its own: the listener runs in the MAIN world, which we share
+ * with YouTube's own scripts and any other extension injecting there, and the
+ * channel element is briefly in the DOM — so a well-formed message can come from
+ * something that isn't our content script.
  * `processorUrl` is the field that matters most — it goes straight to
  * `audioWorklet.addModule`, so it must be an extension URL and nothing else.
  *
@@ -126,8 +138,8 @@ export function parseApplyMessage(raw: string): ApplyMessage | null {
 }
 
 /**
- * Posted from the main-world `injected` script back to the content script after
- * each apply settles, as a JSON string like `ApplyMessage`.
+ * Sent from the main-world `injected` script back to the content script after
+ * each apply settles, as a `STATUS_EVENT` JSON string like `ApplyMessage`.
  */
 export interface StatusMessage {
 	source: 'modulate-page'
