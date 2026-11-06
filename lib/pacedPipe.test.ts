@@ -1,58 +1,14 @@
-import { registerInterpolationStrategy, SoundTouch } from '@soundtouchjs/core'
 import { describe, expect, it } from 'vitest'
 
-import { BANDLIMITED_STRATEGY_ID, bandlimitedKernel } from '@/lib/bandlimitedKernel'
-import { OutputCushion } from '@/lib/outputCushion'
-import { PacedPipe } from '@/lib/pacedPipe'
-
-registerInterpolationStrategy({ id: BANDLIMITED_STRATEGY_ID, kernel: bandlimitedKernel })
-
-const SR = 48_000
-const QUANTUM = 128
-/** As the processor configures them: a 20 ms cushion, low water a quantum above it. */
-const HOLD = 960
-const LOW_WATER = HOLD + QUANTUM
-
-type Pipe = Pick<SoundTouch, 'inputBuffer' | 'outputBuffer' | 'process'> & { pitch: number }
-
-const semitones = (n: number) => 2 ** (n / 12)
-
-/**
- * Drive a pipe like the processor does: set the pitch, push one render quantum of a
- * sine, process, then play what `OutputCushion` allows. Records the output (left
- * channel), how much output each quantum produced (its work), and how many frames
- * each quantum played once playback had started (short of a quantum = silence).
- */
-function drive(pipe: Pipe, pitchAt: (seconds: number) => number, seconds: number, freq = 330) {
-	const cushion = new OutputCushion(HOLD)
-	const out: number[] = []
-	const produced: number[] = []
-	const played: number[] = []
-	const block = new Float32Array(QUANTUM * 2)
-	let t = 0
-	for (let b = 0; b < (SR * seconds) / QUANTUM; b++) {
-		pipe.pitch = pitchAt((b * QUANTUM) / SR)
-		for (let i = 0; i < QUANTUM; i++, t++) {
-			block[2 * i] = block[2 * i + 1] = 0.5 * Math.sin((2 * Math.PI * freq * t) / SR)
-		}
-		const before = pipe.outputBuffer.frameCount
-		pipe.inputBuffer.putSamples(block, 0, QUANTUM)
-		pipe.process()
-		const level = pipe.outputBuffer.frameCount
-		produced.push(level - before)
-		const k = cushion.take(level, QUANTUM)
-		if (out.length > 0) played.push(k)
-		const o = new Float32Array(k * 2)
-		pipe.outputBuffer.extract(o, 0, k)
-		pipe.outputBuffer.receive(k)
-		for (let i = 0; i < k; i++) out.push(o[2 * i]!)
-	}
-	return { out, produced, played }
-}
-
-const paced = () => new PacedPipe(SR, BANDLIMITED_STRATEGY_ID, LOW_WATER)
-const stock = () =>
-	new SoundTouch({ sampleRate: SR, interpolationStrategy: BANDLIMITED_STRATEGY_ID })
+import {
+	HOLD,
+	QUANTUM,
+	SR,
+	drive,
+	pacedPipe as paced,
+	semitoneRatio as semitones,
+	stockPipe as stock,
+} from '@/lib/testing/pipeSim'
 
 /** Frequency from upward zero crossings over the settled tail. */
 function frequency(signal: number[]): number {
@@ -70,8 +26,8 @@ describe('PacedPipe', () => {
 
 	it.each([12, -12])('keeps up with the input at %i semitones', (n) => {
 		// Only what the stretch holds for its window (≤150 ms), plus the cushion, stays behind.
-		const { out } = drive(paced(), () => semitones(n), 3)
-		expect(out.length).toBeGreaterThan(SR * 3 - SR * 0.15 - HOLD)
+		const { playedFrames } = drive(paced(), () => semitones(n), 3)
+		expect(playedFrames).toBeGreaterThan(SR * 3 - SR * 0.15 - HOLD)
 	})
 
 	it('spreads the transposer work across quanta when shifting up', () => {

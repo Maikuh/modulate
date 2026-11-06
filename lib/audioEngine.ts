@@ -191,6 +191,13 @@ class AudioEngine {
 		this.node = node
 		this.source = source
 		this.element = el
+		// The worklet pipeline trails its input by ~80–175 ms (`lib/pipeline.test.ts`)
+		// and the video isn't delayed to match; this is the context's share on top of
+		// that, which only the browser knows.
+		console.debug('[modulate] audio graph built; context latency (s)', {
+			base: ctx.baseLatency,
+			output: ctx.outputLatency,
+		})
 		node.addEventListener('processorerror', (event) => {
 			if (this.node !== node) return
 			console.error('[modulate] audio worklet crashed; bypassing it', event)
