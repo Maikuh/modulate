@@ -23,6 +23,11 @@ export interface VideoSetting {
 	 * before the title resolved) fall back to the video ID.
 	 */
 	title?: string
+	/**
+	 * When the pitch or tempo was last changed (ms since the epoch), so the options
+	 * list can put recently tuned videos first. Absent on entries saved before 1.5.
+	 */
+	updatedAt?: number
 }
 
 export const DEFAULT_VIDEO_SETTING: Readonly<VideoSetting> = Object.freeze({

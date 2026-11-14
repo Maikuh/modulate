@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 
 import {
@@ -29,6 +29,7 @@ describe('video settings round-trip', () => {
 			enabled: true,
 			semitones: 3,
 			tempo: 1.25,
+			updatedAt: expect.any(Number),
 		})
 	})
 
@@ -37,7 +38,23 @@ describe('video settings round-trip', () => {
 		expect(await getRawVideoSetting('abc')).toEqual({
 			...DEFAULT_VIDEO_SETTING,
 			semitones: 2,
+			updatedAt: expect.any(Number),
 		})
+	})
+
+	// The options list puts recently tuned videos first.
+	it('stamps the time a video was last tuned', async () => {
+		const now = vi.spyOn(Date, 'now').mockReturnValue(1000)
+		await setVideoSetting('abc', { semitones: 2 })
+		expect(await getRawVideoSetting('abc')).toMatchObject({ updatedAt: 1000 })
+		now.mockReturnValue(2000)
+		await setVideoSetting('abc', { tempo: 1.5 })
+		expect(await getRawVideoSetting('abc')).toMatchObject({ updatedAt: 2000 })
+		// Switching it off, or a title catching up, isn't tuning it.
+		now.mockReturnValue(3000)
+		await setVideoSetting('abc', { enabled: false, title: 'Song' })
+		expect(await getRawVideoSetting('abc')).toMatchObject({ updatedAt: 2000 })
+		now.mockRestore()
 	})
 
 	it('getRawVideoSetting returns undefined when no explicit entry', async () => {
@@ -205,7 +222,7 @@ describe('no-op pruning', () => {
 	})
 
 	it('still returns the resolved values it wrote', async () => {
-		expect(await setVideoSetting('abc', { semitones: 0 })).toEqual(DEFAULT_VIDEO_SETTING)
+		expect(await setVideoSetting('abc', { semitones: 0 })).toMatchObject(DEFAULT_VIDEO_SETTING)
 	})
 
 	it('leaves other videos untouched', async () => {
@@ -259,16 +276,23 @@ describe('range enforcement at the storage boundary', () => {
 	it('keeps only known fields, and a title only when it is a string', async () => {
 		await seedRaw({
 			abc: { enabled: true, semitones: 2, tempo: 1, title: { bad: true }, junk: 1 },
-			def: { enabled: true, semitones: 3, tempo: 1, title: 'Song' },
+			def: { enabled: true, semitones: 3, tempo: 1, title: 'Song', updatedAt: 5 },
+			ghi: { enabled: true, semitones: 1, tempo: 1, updatedAt: 'yesterday' },
 		})
 		expect(await listVideoSettings()).toEqual({
 			abc: { enabled: true, semitones: 2, tempo: 1 },
-			def: { enabled: true, semitones: 3, tempo: 1, title: 'Song' },
+			def: { enabled: true, semitones: 3, tempo: 1, title: 'Song', updatedAt: 5 },
+			ghi: { enabled: true, semitones: 1, tempo: 1 },
 		})
 
 		await setVideoSetting('abc', { semitones: 4 })
 		const stored = await fakeBrowser.storage.local.get('video:abc')
-		expect(stored['video:abc']).toEqual({ enabled: true, semitones: 4, tempo: 1 })
+		expect(stored['video:abc']).toEqual({
+			enabled: true,
+			semitones: 4,
+			tempo: 1,
+			updatedAt: expect.any(Number),
+		})
 	})
 
 	it('backfills a legacy entry that predates a field', async () => {

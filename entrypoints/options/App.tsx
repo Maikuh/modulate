@@ -2,6 +2,7 @@ import { useSignal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { storage } from 'wxt/utils/storage'
 
+import { Toggle } from '@/components/Toggle'
 import { formatSemitones } from '@/lib/format'
 import { Logo, PowerIcon, FilmIcon, TrashIcon } from '@/lib/icons'
 import type { VideoSetting } from '@/lib/settings'
@@ -10,8 +11,12 @@ import {
 	listVideoSettings,
 	removeVideoSetting,
 	clearVideoSettings,
+	setVideoSetting,
 	watchVideoSettings,
 } from '@/lib/storage'
+
+/** Above this many saved videos, the list gets a search box. */
+const SEARCH_FROM = 6
 
 function App() {
 	const global = useSignal(true)
@@ -19,6 +24,8 @@ function App() {
 	const error = useSignal<string | null>(null)
 	/** "Clear all" was pressed once and waits for the second, confirming press. */
 	const confirmingClear = useSignal(false)
+	/** Filter for the saved-videos list. */
+	const query = useSignal('')
 	const cancelRef = useRef<HTMLButtonElement>(null)
 	const clearRef = useRef<HTMLButtonElement>(null)
 
@@ -86,7 +93,15 @@ function App() {
 		})
 	}
 
-	const videoEntries = Object.entries(videos.value)
+	// Recently tuned first; entries from before `updatedAt` existed after those, by name.
+	const videoEntries = Object.entries(videos.value).sort(
+		([idA, a], [idB, b]) =>
+			(b.updatedAt ?? 0) - (a.updatedAt ?? 0) || (a.title ?? idA).localeCompare(b.title ?? idB),
+	)
+	const needle = query.value.trim().toLowerCase()
+	const shown = needle
+		? videoEntries.filter(([id, s]) => `${s.title ?? ''} ${id}`.toLowerCase().includes(needle))
+		: videoEntries
 	// Nothing left to clear (removed one by one, or from another page).
 	if (videoEntries.length === 0) confirmingClear.value = false
 
@@ -149,17 +164,7 @@ function App() {
 							<span className="row__label">Enable Modulate</span>
 							<span className="row__desc">Turn all pitch and tempo processing on or off.</span>
 						</div>
-						<label className="toggle">
-							<input
-								type="checkbox"
-								aria-label="Enable Modulate"
-								checked={global.value}
-								onChange={(e) => toggleGlobal(e.currentTarget.checked)}
-							/>
-							<span className="toggle__track">
-								<span className="toggle__thumb" />
-							</span>
-						</label>
+						<Toggle checked={global.value} aria-label="Enable Modulate" onChange={toggleGlobal} />
 					</div>
 				</div>
 			</section>
@@ -184,11 +189,26 @@ function App() {
 						</div>
 					) : (
 						<>
+							{videoEntries.length > SEARCH_FROM && (
+								<div className="o-search">
+									<input
+										type="search"
+										className="o-search__input"
+										placeholder="Search saved videos"
+										aria-label="Search saved videos"
+										value={query.value}
+										onInput={(e) => (query.value = e.currentTarget.value)}
+									/>
+								</div>
+							)}
+							{shown.length === 0 && (
+								<p className="o-nomatch">No saved video matches “{query.value.trim()}”.</p>
+							)}
 							<div className="vlist">
-								{videoEntries.map(([id, s]) => {
+								{shown.map(([id, s]) => {
 									const label = s.title ?? id
 									return (
-										<div className="vrow" key={id}>
+										<div className={`vrow${s.enabled ? '' : ' vrow--off'}`} key={id}>
 											<a
 												className="vrow__main"
 												href={`https://www.youtube.com/watch?v=${id}`}
@@ -211,10 +231,18 @@ function App() {
 													<div className="vrow__chips">
 														<span className="chip">{formatSemitones(s.semitones)} st</span>
 														<span className="chip">{s.tempo.toFixed(2)}×</span>
-														{!s.enabled && <span className="chip chip--off">off</span>}
 													</div>
 												</div>
 											</a>
+											<Toggle
+												checked={s.enabled}
+												aria-label={`Apply settings to ${label}`}
+												onChange={(enabled) =>
+													void persist(async () => {
+														await setVideoSetting(id, { enabled })
+													})
+												}
+											/>
 											<button
 												className="icon-btn"
 												// Names the row, not just the action: a screen reader on a list of

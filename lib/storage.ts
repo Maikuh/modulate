@@ -29,6 +29,7 @@ function normalize(raw: unknown): VideoSetting | undefined {
 		tempo: clampTempo(setting.tempo),
 	}
 	if (typeof setting.title === 'string') out.title = setting.title
+	if (Number.isFinite(setting.updatedAt)) out.updatedAt = setting.updatedAt
 	return out
 }
 
@@ -72,7 +73,15 @@ export async function setVideoSetting(
 	const defined = Object.fromEntries(Object.entries(partial).filter(([, v]) => v !== undefined))
 	// Clamp here rather than at each call site: this is the only way a value enters
 	// storage, so enforcing the range at the mutator means callers can't forget.
-	const next = normalize({ ...normalize(stored), ...defined })!
+	// "Last tuned", not "last written": switching a video on or off, or a title
+	// catching up, doesn't move it to the top of the options list.
+	const tuned = 'semitones' in defined || 'tempo' in defined
+	const previous = normalize(stored)
+	const next = normalize({
+		...previous,
+		...defined,
+		updatedAt: tuned ? Date.now() : previous?.updatedAt,
+	})!
 
 	// Prune rather than store an enabled entry sitting at the no-op: `resolveSetting`
 	// cannot tell it apart from having no entry at all, so it holds no information

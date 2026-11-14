@@ -210,9 +210,9 @@ body {
 	background: var(--accent-soft);
 	border-radius: var(--radius-pill);
 }
-.chip--off {
-	color: var(--text-faint);
-	background: var(--surface-2);
+/* Switched off from its toggle: still listed, visibly not applied. */
+.vrow--off .vrow__main {
+	opacity: 0.5;
 }
 
 .vrow-actions {
@@ -259,5 +259,30 @@ body {
 	max-width: 280px;
 	font-size: 13px;
 	line-height: 1.5;
+	color: var(--text-dim);
+}
+
+.o-search {
+	padding: 12px 18px;
+	border-bottom: 1px solid var(--border);
+}
+.o-search__input {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 8px 12px;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
+	background: var(--surface-2);
+	color: var(--text);
+	font: inherit;
+	font-size: 13px;
+}
+.o-search__input::placeholder {
+	color: var(--text-dim);
+}
+.o-nomatch {
+	margin: 0;
+	padding: 18px;
+	font-size: 13px;
 	color: var(--text-dim);
 }

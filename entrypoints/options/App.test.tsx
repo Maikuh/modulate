@@ -16,6 +16,13 @@ beforeEach(() => {
 // Scope queries to this render's container. Address the switch by name rather
 // than by position — an index would silently retarget to the wrong control the
 // moment a checkbox is added above it.
+/** Write entries as an older version did: straight to storage, no `updatedAt`. */
+async function seedRaw(entries: Record<string, object>) {
+	await fakeBrowser.storage.local.set(
+		Object.fromEntries(Object.entries(entries).map(([id, v]) => [`video:${id}`, v])),
+	)
+}
+
 function renderApp() {
 	const view = within(render(<App />).container as HTMLElement)
 	return {
@@ -125,6 +132,59 @@ describe('options App', () => {
 
 		expect(view.queryByRole('button', { name: /remove all/i })).not.toBeInTheDocument()
 		expect(await listVideoSettings()).toHaveProperty('a')
+	})
+
+	it('lists recently tuned videos first, then older entries by name', async () => {
+		const now = vi.spyOn(Date, 'now')
+		await seedRaw({ zz: { semitones: 1, title: 'Zebra' }, aa: { semitones: 1, title: 'Aardvark' } })
+		now.mockReturnValue(1000)
+		await setVideoSetting('old', { semitones: 1, title: 'Older' })
+		now.mockReturnValue(2000)
+		await setVideoSetting('new', { semitones: 1, title: 'Newer' })
+		now.mockRestore()
+
+		const { view } = renderApp()
+		await view.findByText('Newer')
+		const names = view.getAllByRole('link').map((a) => a.getAttribute('title'))
+		expect(names).toEqual(['Newer', 'Older', 'Aardvark', 'Zebra'])
+	})
+
+	it('switches one video off and on from its row', async () => {
+		await setVideoSetting('a', { semitones: 3, title: 'Song' })
+		const { view } = renderApp()
+		const toggle = await view.findByRole('checkbox', { name: 'Apply settings to Song' })
+		expect(toggle).toBeChecked()
+
+		await userEvent.click(toggle)
+		await waitFor(async () =>
+			expect(await listVideoSettings()).toMatchObject({ a: { enabled: false, semitones: 3 } }),
+		)
+		await waitFor(() => expect(toggle).not.toBeChecked())
+	})
+
+	it('offers a search once the list is long, and filters by title or id', async () => {
+		for (let i = 0; i < 7; i++)
+			await setVideoSetting(`id${i}`, { semitones: 1, title: `Song ${i}` })
+		await setVideoSetting('needle', { semitones: 2, title: 'Haystack' })
+		const { view } = renderApp()
+		const search = await view.findByRole('searchbox', { name: 'Search saved videos' })
+
+		await userEvent.type(search, 'hay')
+		expect(view.getAllByRole('link').map((a) => a.getAttribute('title'))).toEqual(['Haystack'])
+
+		await userEvent.clear(search)
+		await userEvent.type(search, 'id3')
+		expect(view.getAllByRole('link').map((a) => a.getAttribute('title'))).toEqual(['Song 3'])
+
+		await userEvent.type(search, 'x')
+		expect(view.getByText(/no saved video matches/i)).toBeInTheDocument()
+	})
+
+	it('keeps a short list without a search box', async () => {
+		await setVideoSetting('a', { semitones: 1 })
+		const { view } = renderApp()
+		await view.findByText('a')
+		expect(view.queryByRole('searchbox')).not.toBeInTheDocument()
 	})
 
 	it('asks about one video in the singular', async () => {
