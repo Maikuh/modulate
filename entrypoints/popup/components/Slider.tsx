@@ -4,11 +4,14 @@ interface SliderProps {
 	min: number
 	max: number
 	step: number
-	onSet: (value: number) => void
+	/** Every value the thumb passes through (drag, arrow keys). */
+	onInput: (value: number) => void
+	/** The value the thumb was released on (or each arrow-key press). */
+	onCommit: (value: number) => void
 	disabled?: boolean
 }
 
-export function Slider({ label, value, min, max, step, onSet, disabled }: SliderProps) {
+export function Slider({ label, value, min, max, step, onInput, onCommit, disabled }: SliderProps) {
 	return (
 		<input
 			type="range"
@@ -19,7 +22,10 @@ export function Slider({ label, value, min, max, step, onSet, disabled }: Slider
 			max={max}
 			step={step}
 			disabled={disabled}
-			onChange={(e) => onSet(Number(e.currentTarget.value))}
+			// Preact's `onChange` is the native `change`, which fires only on release:
+			// listen to `input` too, so the readout and the audio follow the drag.
+			onInput={(e) => onInput(Number(e.currentTarget.value))}
+			onChange={(e) => onCommit(Number(e.currentTarget.value))}
 		/>
 	)
 }
