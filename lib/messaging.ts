@@ -47,15 +47,17 @@ export type PopupMessage =
  * - `waiting-for-gesture`: queued until the page itself is clicked or typed in;
  *   the audio context can't start without that, and popup clicks don't count.
  * - `no-video`: no player element appeared on the page.
+ * - `ad`: an ad is playing; it plays untouched, and the settings resume after it.
  * - `error`: the engine failed (worklet load, capture, routing).
  */
-export type AudioStatus = 'idle' | 'applied' | 'waiting-for-gesture' | 'no-video' | 'error'
+export type AudioStatus = 'idle' | 'applied' | 'waiting-for-gesture' | 'no-video' | 'ad' | 'error'
 
 const AUDIO_STATUSES: readonly AudioStatus[] = [
 	'idle',
 	'applied',
 	'waiting-for-gesture',
 	'no-video',
+	'ad',
 	'error',
 ]
 

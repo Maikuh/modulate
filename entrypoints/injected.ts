@@ -191,16 +191,55 @@ export default defineUnlistedScript(() => {
 			// Otherwise ignore the ratechange our own tempo apply just triggered — this
 			// is also what stops apply → playbackRate → ratechange → apply looping.
 			if (el.playbackRate === msg.tempo) return
+			// During an ad the rate is the page's: our tempo is off until it ends.
+			if (adShowing(el)) return
 		}
 		schedule()
 	}
 
 	/** Bind lifecycle listeners to the current <video>, moving them on element swap. */
 	function trackVideo(el: HTMLVideoElement): void {
+		watchAds(el)
 		if (tracked === el) return
 		if (tracked) for (const type of MEDIA_EVENTS) tracked.removeEventListener(type, onMediaEvent)
 		tracked = el
 		for (const type of MEDIA_EVENTS) el.addEventListener(type, onMediaEvent)
+	}
+
+	// Ads play in the same <video> as the video they interrupt, and the settings are
+	// the video's, not the ad's. YouTube marks the player while one plays.
+	const AD_CLASS = 'ad-showing'
+
+	/** The YouTube player (main or Shorts) around `el`. */
+	function playerOf(el: HTMLVideoElement): Element | null {
+		return el.closest('.html5-video-player')
+	}
+
+	function adShowing(el: HTMLVideoElement): boolean {
+		return playerOf(el)?.classList.contains(AD_CLASS) ?? false
+	}
+
+	let adPlayer: Element | null = null
+	let adObserver: MutationObserver | null = null
+
+	/** Re-apply when an ad starts or ends in `el`'s player. */
+	function watchAds(el: HTMLVideoElement): void {
+		const player = playerOf(el)
+		if (player === adPlayer) return
+		adObserver?.disconnect()
+		adObserver = null
+		adPlayer = player
+		if (!player) return
+		let was = player.classList.contains(AD_CLASS)
+		// Class writes are frequent on the player (hover, controls, buffering): act on
+		// the ad flag flipping only.
+		adObserver = new MutationObserver(() => {
+			const now = player.classList.contains(AD_CLASS)
+			if (now === was) return
+			was = now
+			if (lastMsg) schedule()
+		})
+		adObserver.observe(player, { attributes: true, attributeFilter: ['class'] })
 	}
 
 	/** Re-apply the latest settings once the page sees its first gesture. */
@@ -267,6 +306,13 @@ export default defineUnlistedScript(() => {
 		// Bind (or rebind on swap) the lifecycle listeners so a later media reload or
 		// YouTube-driven rate reset triggers a replay without waiting for the next nav.
 		trackVideo(el)
+		// An ad: play it untouched, and capture nothing for it. The worklet is bypassed
+		// in place and the rate handed back; the class watcher re-applies when it ends.
+		if (adShowing(el)) {
+			audioEngine.attach(el)
+			audioEngine.apply(NO_OP)
+			return 'ad'
+		}
 		// The autoplay policy already refused this page; don't ask again until the
 		// page sees a gesture. Once a graph exists, re-applies never ask at all.
 		if (needsGraph && !audioEngine.hasGraph && blocked) return waitNatively(el, msg)

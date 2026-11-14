@@ -230,6 +230,12 @@ describe('popup App', () => {
 		expect(await view.findByRole('status')).toHaveTextContent(/Click anywhere on the YouTube page/i)
 	})
 
+	it('explains that an ad plays as is', async () => {
+		mockTabs({ ...activeState, semitones: 2, audio: 'ad' })
+		const view = renderApp()
+		expect(await view.findByText(/an ad is playing/i)).toBeInTheDocument()
+	})
+
 	it('surfaces an engine failure', async () => {
 		mockTabs({ ...activeState, semitones: 3, audio: 'error' })
 		const view = renderApp()

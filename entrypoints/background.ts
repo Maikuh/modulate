@@ -23,6 +23,7 @@ export function tooltip(message: BadgeMessage): string {
 	if (isNoOp(message)) return `${NAME}: original pitch and speed`
 	const values = `${formatSemitones(message.semitones)} st · ${message.tempo.toFixed(2)}×`
 	if (message.status === 'error') return `${NAME}: ${values} (audio failed; reload the tab)`
+	if (message.status === 'ad') return `${NAME}: ${values} (paused for the ad)`
 	if (message.status === 'waiting-for-gesture') {
 		return `${NAME}: ${values} (click the page to start)`
 	}

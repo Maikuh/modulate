@@ -137,6 +137,9 @@ describe('background — tooltip', () => {
 		expect(tooltip(badge({ semitones: -2, status: 'waiting-for-gesture' }))).toBe(
 			'Modulate: -2 st · 1.00× (click the page to start)',
 		)
+		expect(tooltip(badge({ semitones: 4, status: 'ad' }))).toBe(
+			'Modulate: +4 st · 1.00× (paused for the ad)',
+		)
 		expect(tooltip(badge({ tempo: 0.75, status: 'error' }))).toBe(
 			'Modulate: 0 st · 0.75× (audio failed; reload the tab)',
 		)

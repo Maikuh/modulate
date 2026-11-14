@@ -80,6 +80,7 @@ const AUDIO_NOTICE: Partial<Record<AudioStatus, { text: string; error?: boolean 
 		text: 'Click anywhere on the YouTube page to start. Browsers hold processed audio until the page itself is clicked.',
 	},
 	'no-video': { text: 'No video player found on this page yet.' },
+	ad: { text: 'An ad is playing, so it plays as is. Your settings come back with the video.' },
 	error: { text: 'Audio processing failed on this page. Reload the tab to retry.', error: true },
 }
 

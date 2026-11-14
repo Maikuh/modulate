@@ -799,6 +799,88 @@ describe('injected script — single instance', () => {
 	})
 })
 
+describe('injected script — ads', () => {
+	let player: HTMLElement
+	let video: HTMLVideoElement
+
+	beforeEach(() => {
+		player = document.createElement('div')
+		player.id = 'movie_player'
+		player.className = 'html5-video-player'
+		video = document.createElement('video')
+		video.className = 'html5-main-video'
+		player.append(video)
+		document.body.append(player)
+	})
+
+	const ad = (on: boolean) => player.classList.toggle('ad-showing', on)
+
+	// The settings are the video's; the ad plays in the same <video>.
+	it('plays an ad untouched, capturing nothing for it', async () => {
+		ad(true)
+		start()
+		const seen = collectStatuses()
+
+		await post(message({ semitones: 3, tempo: 1.5 }))
+
+		expect(engine.ensureGraph).not.toHaveBeenCalled()
+		expect(engine.apply).toHaveBeenLastCalledWith({ semitones: 0, tempo: 1 })
+		expect(seen).toEqual(['ad'])
+	})
+
+	it('applies the settings once the ad ends', async () => {
+		ad(true)
+		start()
+		const seen = collectStatuses()
+		await post(message({ semitones: 3, tempo: 1.5 }))
+
+		ad(false)
+		await tick()
+
+		expect(engine.ensureGraph).toHaveBeenCalledWith(video, PROCESSOR_URL)
+		expect(engine.apply).toHaveBeenLastCalledWith({ semitones: 3, tempo: 1.5 })
+		expect(seen).toEqual(['ad', 'applied'])
+	})
+
+	it('stands down when an ad starts mid-video', async () => {
+		start()
+		const seen = collectStatuses()
+		await post(message({ semitones: 3 }))
+
+		ad(true)
+		await tick()
+
+		expect(engine.apply).toHaveBeenLastCalledWith({ semitones: 0, tempo: 1 })
+		expect(seen).toEqual(['applied', 'ad'])
+	})
+
+	// The player's class changes constantly (hover, controls, buffering).
+	it('ignores class changes that are not the ad flag', async () => {
+		start()
+		await post(message({ semitones: 3 }))
+		vi.clearAllMocks()
+
+		player.classList.add('ytp-autohide')
+		player.classList.remove('ytp-autohide')
+		await tick()
+
+		expect(engine.apply).not.toHaveBeenCalled()
+	})
+
+	// During an ad the rate is the page's: our tempo is off until it ends.
+	it("does not fight the ad's rate", async () => {
+		ad(true)
+		start()
+		await post(message({ tempo: 1.5 }))
+		vi.clearAllMocks()
+
+		video.dispatchEvent(new Event('ratechange'))
+		await tick()
+
+		expect(engine.apply).not.toHaveBeenCalled()
+	})
+})
+
 describe('injected script — context state changes', () => {
 	/** The listener the script handed the engine. */
 	const stateChanged = () => engine.onStateChange.mock.calls.at(-1)![0]
