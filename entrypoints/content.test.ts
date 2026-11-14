@@ -412,6 +412,37 @@ describe('content script', () => {
 			}
 		})
 
+		// With the Navigation API, WXT fires the event from `navigate`, before the URL
+		// commits: `location` still reads the page being left. happy-dom has no
+		// Navigation API, so dispatch the event the way that path does.
+		it('re-applies on a URL change announced before it commits', async () => {
+			await setVideoSetting('vid2', { semitones: 4 })
+			const add = vi.spyOn(window, 'addEventListener')
+			const cs = await startContentScript()
+			const eventName = add.mock.calls
+				.map(([type]) => type)
+				.find((type) => type.endsWith('wxt:locationchange'))
+			add.mockRestore()
+			expect(eventName).toBeDefined()
+			cs.reset()
+
+			const announce = (url: string) => {
+				const event = Object.assign(new Event(eventName!), { newUrl: new URL(url) })
+				window.dispatchEvent(event)
+			}
+			announce('https://www.youtube.com/watch?v=vid2')
+			setUrl('https://www.youtube.com/watch?v=vid2') // the entry commits
+			await tick()
+			expect(cs.applies()).toHaveLength(1)
+			expect(cs.applies()[0]).toMatchObject({ semitones: 4 })
+
+			// Announcing the page already applied changes nothing.
+			announce('https://www.youtube.com/watch?v=vid2')
+			await tick()
+			expect(cs.applies()).toHaveLength(1)
+			cs.stop()
+		})
+
 		// The options page edits storage directly; this is its only path to playback.
 		it('re-applies when storage changes elsewhere', async () => {
 			await setVideoSetting('vid1', { semitones: 3 })

@@ -267,10 +267,17 @@ export default defineContentScript({
 
 		// Fallback: catch URL changes the event might miss. WXT's watcher uses the
 		// Navigation API where the browser has it and polls the URL otherwise.
-		ctx.addEventListener(window, 'wxt:locationchange', () => {
-			if (location.href === lastUrl) return
-			lastUrl = location.href
-			scheduleApply('location-change')
+		//
+		// On the Navigation API path the event fires from `navigate`, BEFORE the URL
+		// commits: `location.href` still reads the page being left. So compare the
+		// event's own destination, and read `location` (as `apply` does) only a task
+		// later, once the history entry has committed. Comparing `location.href` here
+		// would match `lastUrl` on every navigation and never re-apply.
+		ctx.addEventListener(window, 'wxt:locationchange', (event) => {
+			const url = (event as Event & { newUrl?: URL }).newUrl?.href ?? location.href
+			if (url === lastUrl) return
+			lastUrl = url
+			ctx.setTimeout(() => scheduleApply('location-change'), 0)
 		})
 
 		// Re-apply when settings change elsewhere (another tab, the options page edits
