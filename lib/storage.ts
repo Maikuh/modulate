@@ -21,7 +21,8 @@ import {
  * while rendering the options list.
  */
 function normalize(raw: unknown): VideoSetting | undefined {
-	if (typeof raw !== 'object' || raw === null) return undefined
+	// An array is an object too, and would spread into a default-valued entry.
+	if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
 	const setting = { ...DEFAULT_VIDEO_SETTING, ...raw } as VideoSetting
 	const out: VideoSetting = {
 		enabled: setting.enabled !== false,

@@ -317,8 +317,9 @@ describe('range enforcement at the storage boundary', () => {
 	})
 
 	it('treats a value that is not an entry as no entry', async () => {
-		await seedRaw({ abc: 'garbage', def: null })
+		await seedRaw({ abc: 'garbage', def: null, ghi: [3, 1.5] })
 		expect(await getRawVideoSetting('abc')).toBeUndefined()
+		expect(await getRawVideoSetting('ghi')).toBeUndefined()
 		expect(await listVideoSettings()).toEqual({})
 	})
 
