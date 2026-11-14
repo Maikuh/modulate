@@ -73,6 +73,13 @@ export interface StretchNode {
 	setActive(active: boolean): void
 }
 
+/**
+ * How long the worklet gets to instantiate its WASM and answer its first calls.
+ * That takes tens of milliseconds normally; the bound only exists so a worklet
+ * that never starts fails the build instead of hanging it.
+ */
+export const START_TIMEOUT_MS = 10_000
+
 /** Load the worklet module from `moduleUrl` (once per context) and build a node. */
 export async function createStretchNode(
 	ctx: BaseAudioContext,
@@ -109,9 +116,35 @@ export async function createStretchNode(
 			input.port.postMessage([id, method, ...args])
 		})
 
-	await ready
-	await call('configure', { ...STRETCH_CONFIG })
-	console.debug('[modulate] stretch latency (s)', await call('latency'))
+	// Bounded: a worklet whose WASM never instantiates (a CSP that stops allowing
+	// it, a processor that throws while starting) never posts `ready` nor answers a
+	// call, and the build awaiting this would hold the page's apply worker — and
+	// every apply queued behind it — forever, with nothing reported. Reject instead,
+	// so the build closes the context and the page reports an engine error.
+	let timer: ReturnType<typeof setTimeout> | undefined
+	let onError: (() => void) | undefined
+	const failed = new Promise<never>((_, reject) => {
+		timer = setTimeout(
+			() => reject(new Error('the stretch worklet did not start in time')),
+			START_TIMEOUT_MS,
+		)
+		onError = () => reject(new Error('the stretch worklet failed while starting'))
+		input.addEventListener('processorerror', onError)
+	})
+	try {
+		const latency = await Promise.race([
+			(async () => {
+				await ready
+				await call('configure', { ...STRETCH_CONFIG })
+				return call('latency')
+			})(),
+			failed,
+		])
+		console.debug('[modulate] stretch latency (s)', latency)
+	} finally {
+		clearTimeout(timer)
+		input.removeEventListener('processorerror', onError!)
+	}
 
 	const limiter = ctx.createDynamicsCompressor()
 	limiter.threshold.value = LIMITER.threshold

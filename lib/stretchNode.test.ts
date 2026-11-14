@@ -6,6 +6,7 @@ import {
 	PROCESSOR_NAME,
 	STRETCH_CONFIG,
 	createStretchNode,
+	START_TIMEOUT_MS,
 	stretchSemitones,
 } from '@/lib/stretchNode'
 import {
@@ -103,7 +104,7 @@ describe('the Signalsmith worklet, offline', () => {
 describe('createStretchNode', () => {
 	/** The real processor behind a fake AudioWorkletNode, ports linked both ways. */
 	let processor: Processor | undefined
-	class LinkedWorkletNode {
+	class LinkedWorkletNode extends EventTarget {
 		readonly port = {
 			onmessage: null as ((e: { data: unknown[] }) => void) | null,
 			postMessage: (msg: unknown[]) => {
@@ -115,6 +116,7 @@ describe('createStretchNode', () => {
 		readonly options: Record<string, unknown>
 		readonly name: string
 		constructor(_ctx: unknown, name: string, options: Record<string, unknown>) {
+			super()
 			this.name = name
 			this.options = options
 			processor = constructProcessor(options, (msg) =>
@@ -140,9 +142,46 @@ describe('createStretchNode', () => {
 		createGain: () => ({ gain: param(), connect: <T>(next: T) => next }),
 	}
 
+	/** A worklet node that never hears back from its processor. */
+	class SilentWorkletNode extends EventTarget {
+		static last: SilentWorkletNode | undefined
+		readonly port = { onmessage: null, postMessage: () => {} }
+		constructor() {
+			super()
+			SilentWorkletNode.last = this
+		}
+		connect<T>(next: T): T {
+			return next
+		}
+	}
+
 	afterEach(() => {
+		vi.useRealTimers()
 		vi.unstubAllGlobals()
 		processor = undefined
+		SilentWorkletNode.last = undefined
+	})
+
+	it('fails instead of hanging when the worklet never starts', async () => {
+		vi.useFakeTimers()
+		vi.stubGlobal('AudioWorkletNode', SilentWorkletNode)
+		const created = createStretchNode(ctx as never, 'chrome-extension://x/processor.js')
+		// Settled up front so the rejection isn't reported unhandled while time runs.
+		const outcome = created.then(
+			() => null,
+			(err: unknown) => err,
+		)
+		await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS)
+		expect(await outcome).toBeInstanceOf(Error)
+		await expect(created).rejects.toThrow(/did not start/)
+	})
+
+	it('fails when the processor errors while starting', async () => {
+		vi.stubGlobal('AudioWorkletNode', SilentWorkletNode)
+		const created = createStretchNode(ctx as never, 'chrome-extension://x/processor.js')
+		await until(() => SilentWorkletNode.last !== undefined)
+		SilentWorkletNode.last!.dispatchEvent(new Event('processorerror'))
+		await expect(created).rejects.toThrow(/failed while starting/)
 	})
 
 	it('loads the module, configures it and drives it over the port', async () => {
