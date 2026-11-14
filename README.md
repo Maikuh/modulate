@@ -25,8 +25,11 @@ browser's native pitch-preserving playback rate.
 - **Per-video state** — each YouTube video keeps its own settings, keyed by video ID.
 - **Global + per-video toggles** — a master switch plus an on/off per video.
 - **Keyboard shortcuts** — nudge pitch/tempo without opening the popup:
-  - `Ctrl+Shift+Up` / `Ctrl+Shift+Down` — pitch up / down a semitone
-  - `Ctrl+Shift+Right` / `Ctrl+Shift+Left` — tempo up / down
+  - `Alt+Shift+Up` / `Alt+Shift+Down` — pitch up / down a semitone
+  - `Alt+Shift+Right` / `Alt+Shift+Left` — tempo up / down
+  - on macOS, `Control+Shift` instead of `Alt+Shift`
+  - rebind them at `chrome://extensions/shortcuts` (Firefox: _Manage Extension Shortcuts_
+    in `about:addons`)
 - **Toolbar badge** — shows when an effect is active on the current tab, and when it is
   waiting for a click in the page or has failed.
 - **Saved-video management** — review, remove, or clear stored per-video settings.

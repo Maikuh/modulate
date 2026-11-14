@@ -31,21 +31,27 @@ export default defineConfig({
 				},
 			},
 		}),
+		// Extension commands are browser-wide: the key is taken on every site, not
+		// only YouTube. So none of these may be a text-editing chord. Ctrl+Shift+Arrow
+		// is select-by-word on Windows/Linux (Cmd+Shift+Arrow, select-to-line-end, on
+		// a Mac, where Chrome maps `Ctrl` to Cmd), and Option+Shift+Arrow is
+		// select-by-word on a Mac. Alt+Shift+Arrow edits nothing on Windows/Linux, and
+		// on a Mac `MacCtrl` is the real Control key, where Control+Shift+Arrow is free.
 		commands: {
 			'modulate-pitch-up': {
-				suggested_key: { default: 'Ctrl+Shift+Up' },
+				suggested_key: { default: 'Alt+Shift+Up', mac: 'MacCtrl+Shift+Up' },
 				description: 'Raise pitch a semitone',
 			},
 			'modulate-pitch-down': {
-				suggested_key: { default: 'Ctrl+Shift+Down' },
+				suggested_key: { default: 'Alt+Shift+Down', mac: 'MacCtrl+Shift+Down' },
 				description: 'Lower pitch a semitone',
 			},
 			'modulate-tempo-up': {
-				suggested_key: { default: 'Ctrl+Shift+Right' },
+				suggested_key: { default: 'Alt+Shift+Right', mac: 'MacCtrl+Shift+Right' },
 				description: 'Speed up playback',
 			},
 			'modulate-tempo-down': {
-				suggested_key: { default: 'Ctrl+Shift+Left' },
+				suggested_key: { default: 'Alt+Shift+Left', mac: 'MacCtrl+Shift+Left' },
 				description: 'Slow down playback',
 			},
 		},
