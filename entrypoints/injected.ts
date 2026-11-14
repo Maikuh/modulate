@@ -342,6 +342,14 @@ export default defineUnlistedScript(() => {
 		)
 	}
 
+	// The browser can suspend the context after the build (some audio-session
+	// interruptions), which silences a captured element whatever the routing. Re-run
+	// the latest apply: it reports the wait (and arms the gesture retry), or that
+	// audio is back.
+	audioEngine.onStateChange(() => {
+		if (lastMsg) schedule()
+	})
+
 	function onApply(event: Event): void {
 		const detail = (event as CustomEvent<unknown>).detail
 		if (typeof detail !== 'string') return

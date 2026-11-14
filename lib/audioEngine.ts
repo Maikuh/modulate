@@ -105,6 +105,8 @@ class AudioEngine {
 	 * silently undo the speed the viewer picked in the player.
 	 */
 	private drivingRate = false
+	/** Called when the running context's state changes (see `onStateChange`). */
+	private stateListener: (() => void) | null = null
 
 	/**
 	 * The graph is bypassed (source wired straight to speakers) whenever there is
@@ -234,6 +236,11 @@ class AudioEngine {
 			await this.close()
 			throw err
 		}
+		// Only now, with the context known to run: the build's own resume would
+		// otherwise report back into an apply that is still running.
+		ctx.addEventListener('statechange', () => {
+			if (this.ctx === ctx && ctx.state !== 'closed') this.stateListener?.()
+		})
 		// The worklet trails its input by ~140–150 ms (`lib/stretchNode.test.ts`) and
 		// the video isn't delayed to match; this is the context's share on top of that,
 		// which only the browser knows.
@@ -377,6 +384,15 @@ class AudioEngine {
 		el.preservesPitch = value
 		if ('mozPreservesPitch' in el) el.mozPreservesPitch = value
 		if ('webkitPreservesPitch' in el) el.webkitPreservesPitch = value
+	}
+
+	/**
+	 * Be told when the context stops or starts running after the build: a browser
+	 * can suspend it (some audio-session interruptions), and a captured element is
+	 * silent while it is. Not called for the close on unload.
+	 */
+	onStateChange(listener: () => void): void {
+		this.stateListener = listener
 	}
 
 	/** Whether the graph has been built (the video is already captured). */

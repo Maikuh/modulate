@@ -63,7 +63,7 @@ class FakeStretch {
 	}
 }
 
-class FakeAudioContext {
+class FakeAudioContext extends EventTarget {
 	static live = 0
 	static created: FakeAudioContext[] = []
 	/** Elements captured across ALL contexts — the restriction is per document. */
@@ -78,6 +78,7 @@ class FakeAudioContext {
 	readonly sources = new Map<unknown, FakeNode>()
 
 	constructor(_opts?: unknown) {
+		super()
 		FakeAudioContext.live++
 		FakeAudioContext.created.push(this)
 	}
@@ -100,14 +101,21 @@ class FakeAudioContext {
 
 	resume(): Promise<void> {
 		if (!FakeAudioContext.allowStart) return new Promise(() => {})
-		this.state = 'running'
+		this.setState('running')
 		return Promise.resolve()
+	}
+
+	/** Change state and announce it, as a real context does. */
+	setState(state: FakeAudioContext['state']): void {
+		if (state === this.state) return
+		this.state = state
+		this.dispatchEvent(new Event('statechange'))
 	}
 
 	async close(): Promise<void> {
 		this.closeCalls++
 		if (this.state !== 'closed') FakeAudioContext.live--
-		this.state = 'closed'
+		this.setState('closed')
 	}
 
 	static reset(): void {
@@ -751,6 +759,35 @@ describe('AudioEngine — graph lifecycle', () => {
 
 		expect(engine.hasGraph).toBe(false)
 		expect(FakeAudioContext.live).toBe(0)
+	})
+})
+
+describe('AudioEngine — context state', () => {
+	// A captured element is silent while its context is suspended.
+	it('reports the context stopping and starting after the build', async () => {
+		const engine = await freshEngine()
+		const changes = vi.fn()
+		engine.onStateChange(changes)
+		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+		expect(changes).not.toHaveBeenCalled() // the build's own start isn't news
+
+		currentCtx().setState('suspended')
+		expect(changes).toHaveBeenCalledOnce()
+		expect(engine.running).toBe(false)
+
+		currentCtx().setState('running')
+		expect(changes).toHaveBeenCalledTimes(2)
+	})
+
+	it('stays quiet about the close on unload', async () => {
+		const engine = await freshEngine()
+		const changes = vi.fn()
+		engine.onStateChange(changes)
+		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+
+		await engine.dispose()
+
+		expect(changes).not.toHaveBeenCalled()
 	})
 })
 

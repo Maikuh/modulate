@@ -17,6 +17,7 @@ vi.mock('@/lib/audioEngine', () => ({
 		apply: vi.fn(),
 		resume: vi.fn().mockResolvedValue(undefined),
 		dispose: vi.fn().mockResolvedValue(undefined),
+		onStateChange: vi.fn(),
 	},
 }))
 
@@ -783,6 +784,38 @@ describe('injected script — single instance', () => {
 
 		expect(engine.apply).toHaveBeenCalledWith({ semitones: 3, tempo: 1 })
 		expect(seen).toEqual(['applied'])
+	})
+})
+
+describe('injected script — context state changes', () => {
+	/** The listener the script handed the engine. */
+	const stateChanged = () => engine.onStateChange.mock.calls.at(-1)![0]
+
+	// A suspended context silences the captured element while the badge says applied.
+	it('reports the wait when the browser suspends audio, and the return when it resumes', async () => {
+		mountVideo()
+		start()
+		const seen = collectStatuses()
+		await post(message({ semitones: 2 }))
+		expect(seen).toEqual(['applied'])
+
+		engine.running = false
+		stateChanged()()
+		await tick()
+		expect(seen.at(-1)).toBe('waiting-for-gesture')
+
+		engine.running = true
+		stateChanged()()
+		await tick()
+		expect(seen.at(-1)).toBe('applied')
+	})
+
+	it('does nothing before any settings arrived', async () => {
+		mountVideo()
+		start()
+		stateChanged()()
+		await tick()
+		expect(engine.apply).not.toHaveBeenCalled()
 	})
 })
 
