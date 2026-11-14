@@ -228,8 +228,8 @@ export default defineUnlistedScript(() => {
 			// An element is already bound: return it to native playback in place WITHOUT
 			// re-resolving it. Leaving a watch page for the feed resolves to a no-op, and
 			// `findVideo` off a watch page can legitimately match a hover-preview — which
-			// would send `ensureGraph` down its element-swap path, disposing the working
-			// context and irreversibly capturing the wrong <video>.
+			// would send `ensureGraph` down its element-swap path, irreversibly capturing
+			// the wrong <video> and moving the worklet off the player.
 			audioEngine.apply(NO_OP)
 			return 'applied'
 		}

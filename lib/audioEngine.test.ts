@@ -72,8 +72,10 @@ class FakeAudioContext {
 	state: 'suspended' | 'running' | 'closed' = 'suspended'
 	destination = new FakeNode()
 	closeCalls = 0
-	/** The source node this context handed out, so tests can reach it. */
+	/** The source node this context handed out last, so tests can reach it. */
 	source?: FakeNode
+	/** Every source node it handed out, by element. */
+	readonly sources = new Map<unknown, FakeNode>()
 
 	constructor(_opts?: unknown) {
 		FakeAudioContext.live++
@@ -86,6 +88,7 @@ class FakeAudioContext {
 		}
 		FakeAudioContext.captured.add(el)
 		this.source = new FakeNode()
+		this.sources.set(el, this.source)
 		return this.source
 	}
 
@@ -461,23 +464,147 @@ describe('AudioEngine — graph lifecycle', () => {
 		expect(FakeAudioContext.captured.size).toBe(1)
 	})
 
-	// YouTube swaps the <video> for ads and the miniplayer. Browsers cap live
-	// contexts; past the cap `new AudioContext()` throws and audio dies.
-	it('closes the previous context when the element is swapped', async () => {
-		const engine = await freshEngine()
-
-		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
-		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
-
-		expect(FakeAudioContext.created).toHaveLength(2)
-		expect(FakeAudioContext.created[0]!.closeCalls).toBe(1)
-		expect(FakeAudioContext.live).toBe(1)
-	})
-
-	it('does not leak a context across many swaps', async () => {
+	// YouTube swaps the <video> for ads and the miniplayer. Closing a context mutes
+	// every element it captured for good, and browsers cap live contexts besides:
+	// one context serves every element.
+	it('keeps one context across element swaps', async () => {
 		const engine = await freshEngine()
 		for (let i = 0; i < 10; i++) await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+
+		expect(FakeAudioContext.created).toHaveLength(1)
 		expect(FakeAudioContext.live).toBe(1)
+		expect(currentCtx().closeCalls).toBe(0)
+		expect(currentCtx().sources.size).toBe(10)
+	})
+
+	// The element being left can only play through our context from now on.
+	it('keeps the element being left audible, untransposed', async () => {
+		const engine = await freshEngine()
+		const first = makeVideo()
+		await engine.ensureGraph(first, PROCESSOR_URL)
+		engine.apply({ semitones: 3 })
+
+		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+
+		const { destination } = currentCtx()
+		const left = currentCtx().sources.get(first)!
+		expect(left.outputs.has(destination)).toBe(true)
+		expect(left.outputs.has(currentWorklet().input)).toBe(false)
+		// ...while the new element takes the worklet path.
+		expect(currentSource().outputs.has(currentWorklet().input)).toBe(true)
+	})
+
+	// YouTube can swap an element out and later back in.
+	it('switches back to an element captured earlier without capturing it again', async () => {
+		const engine = await freshEngine()
+		const first = makeVideo()
+		const second = makeVideo()
+		await engine.ensureGraph(first, PROCESSOR_URL)
+		await engine.ensureGraph(second, PROCESSOR_URL)
+
+		await engine.ensureGraph(first, PROCESSOR_URL)
+		engine.apply({ semitones: 3, tempo: 1.5 })
+
+		const ctx = currentCtx()
+		expect(FakeAudioContext.created).toHaveLength(1)
+		expect(FakeAudioContext.captured.size).toBe(2)
+		expect(ctx.sources.get(first)!.outputs.has(currentWorklet().input)).toBe(true)
+		expect(ctx.sources.get(second)!.outputs.has(ctx.destination)).toBe(true)
+		expect(first.playbackRate).toBe(1.5)
+		expect(second.playbackRate).toBe(1)
+	})
+
+	// A context the browser suspended since would play a newly captured element
+	// silently, and the capture can't be undone.
+	it('captures a new element only while the context runs', async () => {
+		const engine = await freshEngine()
+		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+		const ctx = currentCtx()
+		const playing = currentSource()
+		ctx.state = 'suspended'
+		FakeAudioContext.allowStart = false
+
+		const next = makeVideo()
+		vi.useFakeTimers()
+		try {
+			const outcome = engine.ensureGraph(next, PROCESSOR_URL).catch((err: unknown) => err)
+			await vi.advanceTimersByTimeAsync(2000)
+			expect(await outcome).toBeInstanceOf(AudioBlockedError)
+		} finally {
+			vi.useRealTimers()
+		}
+
+		expect(FakeAudioContext.captured.has(next)).toBe(false)
+		expect(ctx.closeCalls).toBe(0)
+		expect(playing.reaches(ctx.destination)).toBe(true)
+	})
+
+	it('gives a new element a fresh worklet after a crash', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {})
+		const engine = await freshEngine()
+		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+		const crashed = currentWorklet()
+		crashed.input.dispatchEvent(new Event('processorerror'))
+
+		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+		engine.apply({ semitones: 4 })
+
+		const fresh = currentWorklet()
+		expect(fresh).not.toBe(crashed)
+		expect(FakeAudioContext.created).toHaveLength(1)
+		expect(currentSource().outputs.has(fresh.input)).toBe(true)
+		expect(fresh.active).toBe(true)
+	})
+
+	it('stays bypassed when the fresh worklet fails to load too', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {})
+		const engine = await freshEngine()
+		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+		currentWorklet().input.dispatchEvent(new Event('processorerror'))
+		FakeStretch.load.mockRejectedValue(new Error('404'))
+
+		const el = makeVideo()
+		await engine.ensureGraph(el, PROCESSOR_URL)
+		engine.apply({ semitones: 4, tempo: 1.5 })
+
+		expect(currentSource().outputs.has(currentCtx().destination)).toBe(true)
+		expect(el.preservesPitch).toBe(true)
+		expect(el.playbackRate).toBe(1.5)
+	})
+
+	// Something else (another extension) captured the element first.
+	it('closes a context that captured nothing when the first capture throws', async () => {
+		const engine = await freshEngine()
+		const el = makeVideo()
+		FakeAudioContext.captured.add(el)
+
+		await expect(engine.ensureGraph(el, PROCESSOR_URL)).rejects.toThrow(/already connected/)
+
+		expect(FakeAudioContext.live).toBe(0)
+		expect(engine.hasGraph).toBe(false)
+	})
+
+	it('keeps the current element playing when a later capture throws', async () => {
+		const engine = await freshEngine()
+		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
+		const playing = currentSource()
+		const taken = makeVideo()
+		FakeAudioContext.captured.add(taken)
+
+		await expect(engine.ensureGraph(taken, PROCESSOR_URL)).rejects.toThrow(/already connected/)
+
+		expect(FakeAudioContext.live).toBe(1)
+		expect(playing.reaches(currentCtx().destination)).toBe(true)
+	})
+
+	it('refuses an element captured into a context since closed', async () => {
+		const engine = await freshEngine()
+		const el = makeVideo()
+		await engine.ensureGraph(el, PROCESSOR_URL)
+		await engine.dispose()
+
+		await expect(engine.ensureGraph(el, PROCESSOR_URL)).rejects.toThrow(/cannot be captured again/)
+		expect(FakeAudioContext.created).toHaveLength(1)
 	})
 
 	// Every failure path is retried from media events, SPA nav, the URL poll and
@@ -515,21 +642,6 @@ describe('AudioEngine — graph lifecycle', () => {
 		expect(currentSource().reaches(currentCtx().destination)).toBe(true)
 	})
 
-	// YouTube can swap an element out and later back in. Its old context is closed
-	// and the element cannot be captured again; say so, without opening a context.
-	it('refuses to re-capture an element whose graph was disposed', async () => {
-		const engine = await freshEngine()
-		const first = makeVideo()
-		await engine.ensureGraph(first, PROCESSOR_URL)
-		await engine.ensureGraph(makeVideo(), PROCESSOR_URL)
-		const contexts = FakeAudioContext.created.length
-
-		await expect(engine.ensureGraph(first, PROCESSOR_URL)).rejects.toThrow(
-			/cannot be captured again/,
-		)
-		expect(FakeAudioContext.created).toHaveLength(contexts)
-	})
-
 	it('does not leak across repeated failed builds', async () => {
 		const engine = await freshEngine()
 		FakeStretch.load.mockRejectedValue(new Error('404'))
@@ -556,8 +668,8 @@ describe('AudioEngine — graph lifecycle', () => {
 
 		const a = engine.ensureGraph(first, PROCESSOR_URL)
 		const b = engine.ensureGraph(second, PROCESSOR_URL)
-		// build() awaits dispose() before it reaches the module load, so the blocking
-		// promise does not exist yet at this point in the turn.
+		// build() awaits the context start before it reaches the module load, so the
+		// blocking promise does not exist yet at this point in the turn.
 		await new Promise((r) => setTimeout(r, 0))
 		release()
 		await Promise.all([a, b])

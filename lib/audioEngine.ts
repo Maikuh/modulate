@@ -39,8 +39,13 @@ import { createStretchNode, type StretchNode } from '@/lib/stretchNode'
  *    shift undoes that in the same pass as the transpose (`stretchSemitones`).
  *    One stretch, not two.
  *
- * On YouTube the same `<video>` element persists across SPA navigations, so a
- * single graph built once serves every video; only the parameters change.
+ * One context and one worklet serve the page for its whole lifetime. YouTube keeps
+ * one `<video>` across SPA navigations, but swaps it now and then (ads, the
+ * miniplayer) and may swap an earlier one back in. Each element is captured once,
+ * into that same context: the current one takes the worklet path, every other one
+ * stays wired straight to the speakers. Closing a context would leave the elements
+ * it captured silent for the rest of the page — they could never be captured again
+ * — so the context is only closed on unload, or when it captured nothing.
  */
 /**
  * How long the build waits for a fresh context to start before concluding the
@@ -64,9 +69,12 @@ export class AudioBlockedError extends Error {
 
 class AudioEngine {
 	private ctx: AudioContext | null = null
-	private source: MediaElementAudioSourceNode | null = null
 	private node: StretchNode | null = null
-	/** The element the graph captured; `null` while there is no graph. */
+	/** Every element captured into `ctx`, with its source node. */
+	private sources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>()
+	/** The current element's source: the one routed through the worklet. */
+	private source: MediaElementAudioSourceNode | null = null
+	/** The current captured element; `null` while there is no graph. */
 	private graphElement: HTMLMediaElement | null = null
 	/**
 	 * The element whose rate we control: the graph's element once there is a graph,
@@ -76,16 +84,16 @@ class AudioEngine {
 	/** The in-flight build, and the element it is capturing. */
 	private building: { el: HTMLMediaElement; promise: Promise<void> } | null = null
 	/**
-	 * Every element this engine has ever captured. Capture is per document, not per
-	 * context, so an element whose context was disposed (YouTube swapped it out, then
-	 * back in) can never be captured again — checked up front so that case fails
-	 * with a message that says so, instead of churning a context per retry into a
-	 * generic `InvalidStateError`.
+	 * Every element this engine has ever captured, `sources` included. Capture is
+	 * per document, not per context, so an element captured into a context that was
+	 * since closed (on unload) can never be captured again — checked up front so
+	 * that case fails with a message that says so, instead of a generic
+	 * `InvalidStateError`.
 	 */
 	private captured = new WeakSet<HTMLMediaElement>()
 	/**
 	 * The worklet raised `processorerror`: it outputs silence from then on, so the
-	 * graph stays bypassed until an element swap builds a fresh one.
+	 * graph stays bypassed until an element swap builds a fresh worklet.
 	 */
 	private failed = false
 	private semitones = 0
@@ -122,8 +130,8 @@ class AudioEngine {
 	}
 
 	/**
-	 * Build the graph for `el` if not already built. Idempotent and safe to await
-	 * repeatedly, including concurrently for different elements.
+	 * Route `el` through the graph, building the graph on first use. Idempotent and
+	 * safe to await repeatedly, including concurrently for different elements.
 	 */
 	async ensureGraph(el: HTMLMediaElement, processorUrl: string): Promise<void> {
 		if (this.graphElement === el && this.node) return
@@ -134,8 +142,7 @@ class AudioEngine {
 			// Otherwise YouTube swapped the <video> mid-build. Returning the in-flight
 			// promise would resolve "successfully" while the graph points at the OLD
 			// element — the caller then applies pitch/tempo to an element that is no
-			// longer playing, and the one that is stays uncaptured until some unrelated
-			// later apply happens to rebuild. Let it settle, then build for real.
+			// longer playing. Let it settle, then switch for real.
 			await this.building.promise.catch(() => {})
 			return this.ensureGraph(el, processorUrl)
 		}
@@ -148,62 +155,85 @@ class AudioEngine {
 	}
 
 	private async build(el: HTMLMediaElement, processorUrl: string): Promise<void> {
-		// YouTube sometimes swaps the <video> element (ads, miniplayer↔watch). A new
-		// element falls past the ensureGraph guard into a rebuild — close the prior
-		// context first, or each swap leaks an AudioContext. Browsers cap the number
-		// of live contexts; past the cap `new AudioContext()` throws and audio dies.
-		// Closing does NOT hand the old element back to direct output (its output is
-		// just ignored from then on), which is why the swap has to build a new graph.
-		// The rate is left alone: a native tempo already playing on `el` keeps playing
-		// through the build instead of blipping back to 1× and forward again.
-		await this.disposeGraph()
-
-		if (this.captured.has(el)) {
+		let source = this.sources.get(el)
+		if (!source && this.captured.has(el)) {
 			throw new Error(
 				'this <video> was captured by an earlier audio graph and cannot be captured again; reload the page',
 			)
 		}
 
+		if (!this.ctx) {
+			await this.open(processorUrl)
+		} else if (!source) {
+			// Capturing into a context that isn't running plays the element silently,
+			// and can't be undone. The context runs already unless the browser suspended
+			// it since; then this asks, as the first build does.
+			await this.resume(START_TIMEOUT_MS)
+			if (!this.running) throw new AudioBlockedError()
+		}
+		// A crashed worklet stays bypassed for the element it crashed on; a new
+		// element gets a fresh one (the module is already loaded in this context).
+		if (this.failed && this.graphElement !== el) await this.replaceNode(processorUrl)
+		const ctx = this.ctx!
+
+		if (!source) {
+			// Throws when something else captured the element first. Nothing changed
+			// yet, so the current element keeps playing as it was; a context that never
+			// captured anything is closed rather than left open for nothing.
+			try {
+				source = ctx.createMediaElementSource(el)
+			} catch (err) {
+				if (!this.source) await this.close()
+				throw err
+			}
+			this.captured.add(el)
+			this.sources.set(el, source)
+		}
+
+		// From here on `el` outputs ONLY through this context. Nothing below may close
+		// it: the element would go silent for good. `route()` falls back to the bypass
+		// wiring on a throw, which keeps the video audible.
+		//
+		// The element being left keeps its own path to the speakers, untransposed: it
+		// can no longer play any other way, and YouTube may bring it back.
+		if (this.source && this.source !== source) {
+			this.source.disconnect()
+			this.source.connect(ctx.destination)
+		}
+		this.source = source
+		this.graphElement = el
+		this.attach(el)
+		this.route()
+	}
+
+	/**
+	 * Open the context and its worklet. Nothing is captured here, so a failure closes
+	 * the context again: a context that is never closed counts against the browser's
+	 * cap on live contexts, past which `new AudioContext()` throws.
+	 */
+	private async open(processorUrl: string): Promise<void> {
 		// 'playback' over the default 'interactive': a larger output buffer gives the
 		// worklet more slack before a late render quantum becomes an audible gap. We
 		// don't need low latency — this is offline-style playback, not live monitoring.
 		const ctx = new AudioContext({ latencyHint: 'playback' })
-		// Adopt the context BEFORE anything that can throw. `register` fetches the
-		// worklet module over the network and `createMediaElementSource` throws if the
-		// element was captured before — and a context we never stored is one `dispose`
-		// can never close. Since every failure path is retried (media events, SPA nav,
-		// the URL poll, three storage watchers), leaking one per attempt would burn
-		// through the cap in seconds and take audio down for the rest of the page.
+		// Adopt the context BEFORE anything that can throw, so `close` can reach it.
+		// Every failure path is retried (media events, SPA nav, storage watchers), and
+		// leaking one per attempt would burn through the cap in seconds.
 		this.ctx = ctx
-		let node: StretchNode
-		let source: MediaElementAudioSourceNode
 		try {
 			// Ask the autoplay policy before anything irreversible. A context that won't
-			// run would leave the captured element playing silently — and capture can't
-			// be undone — so if it doesn't start, close it and let the caller retry after
-			// a gesture. This is a real check, not a guess from `userActivation`: browsers
+			// run would leave a captured element playing silently — and capture can't be
+			// undone — so if it doesn't start, close it and let the caller retry after a
+			// gesture. This is a real check, not a guess from `userActivation`: browsers
 			// also let trusted sites start audio without one (Chrome's media engagement
 			// score, which YouTube regulars clear easily; Firefox's per-site permission).
 			await this.resume(START_TIMEOUT_MS)
 			if (ctx.state !== 'running') throw new AudioBlockedError()
-
-			node = await createStretchNode(ctx, processorUrl)
-			source = ctx.createMediaElementSource(el)
+			this.adoptNode(await createStretchNode(ctx, processorUrl))
 		} catch (err) {
-			await this.disposeGraph()
+			await this.close()
 			throw err
 		}
-
-		// Captured. From here on the element outputs ONLY through this context, so no
-		// failure past this point may dispose it: a closed context ignores the
-		// element's output and the element can never be captured again — the video
-		// would stay muted until a reload. Keep the graph; `route()` falls back to the
-		// bypass wiring on a throw, which keeps the video audible.
-		this.captured.add(el)
-		this.node = node
-		this.source = source
-		this.graphElement = el
-		this.attach(el)
 		// The worklet trails its input by ~140–150 ms (`lib/stretchNode.test.ts`) and
 		// the video isn't delayed to match; this is the context's share on top of that,
 		// which only the browser knows.
@@ -211,13 +241,29 @@ class AudioEngine {
 			base: ctx.baseLatency,
 			output: ctx.outputLatency,
 		})
+	}
+
+	/** Swap a crashed worklet for a fresh one, or stay bypassed if that fails too. */
+	private async replaceNode(processorUrl: string): Promise<void> {
+		try {
+			const node = await createStretchNode(this.ctx!, processorUrl)
+			this.node?.output.disconnect()
+			this.node?.setActive(false)
+			this.adoptNode(node)
+			this.failed = false
+		} catch (err) {
+			console.error('[modulate] could not rebuild the crashed audio worklet', err)
+		}
+	}
+
+	private adoptNode(node: StretchNode): void {
+		this.node = node
 		node.input.addEventListener('processorerror', (event) => {
 			if (this.node !== node) return
 			console.error('[modulate] audio worklet crashed; bypassing it', event)
 			this.failed = true
 			this.route()
 		})
-		this.route()
 	}
 
 	/**
@@ -348,7 +394,7 @@ class AudioEngine {
 	 * the context runs, whatever the routing.
 	 */
 	captures(el: HTMLMediaElement): boolean {
-		return this.node !== null && this.graphElement === el
+		return this.ctx !== null && this.sources.has(el)
 	}
 
 	/**
@@ -393,22 +439,17 @@ class AudioEngine {
 
 	/**
 	 * Tear down the graph and hand the element back to native playback. Used on real
-	 * page unload. Note that closing does NOT hand a captured element back to the
+	 * page unload only: closing does NOT hand a captured element back to the
 	 * speakers — per spec its output is simply ignored from then on.
 	 */
 	async dispose(): Promise<void> {
-		await this.disposeGraph()
+		await this.close()
 		this.releaseRate()
 		this.element = null
 	}
 
-	/**
-	 * Close the context and drop the graph, leaving the element's rate as it is.
-	 * Used on element swap (above), so repeated swaps don't exhaust the browser's
-	 * context cap — a swap must rebuild rather than merely dispose, since closing
-	 * does not release the captured element.
-	 */
-	private async disposeGraph(): Promise<void> {
+	/** Close the context and drop the graph, leaving the element's rate as it is. */
+	private async close(): Promise<void> {
 		this.node?.output.disconnect()
 		this.source?.disconnect()
 		const ctx = this.ctx
@@ -416,6 +457,7 @@ class AudioEngine {
 		this.node = null
 		this.source = null
 		this.graphElement = null
+		this.sources = new WeakMap()
 		this.failed = false
 		if (ctx && ctx.state !== 'closed') {
 			// A close that silently fails is what drives the context cap to exhaustion,
