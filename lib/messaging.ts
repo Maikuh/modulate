@@ -22,12 +22,18 @@
 import { clampSemitones, clampTempo, type ResolvedSetting } from '@/lib/settings'
 import { isVideoId } from '@/lib/youtube'
 
+/**
+ * `fromShortcut` marks a nudge sent by the background for a keyboard command:
+ * the page shows what it did (the popup, when used, shows that itself), and a
+ * nudge for a video or extension switched off changes nothing — there are no
+ * visible controls to say the stored value moved.
+ */
 export type PopupMessage =
 	| { type: 'GET_STATE' }
 	| { type: 'SET_SEMITONES'; semitones: number }
-	| { type: 'NUDGE_SEMITONES'; delta: number }
+	| { type: 'NUDGE_SEMITONES'; delta: number; fromShortcut?: boolean }
 	| { type: 'SET_TEMPO'; tempo: number }
-	| { type: 'NUDGE_TEMPO'; delta: number }
+	| { type: 'NUDGE_TEMPO'; delta: number; fromShortcut?: boolean }
 	| { type: 'SET_VIDEO_ENABLED'; enabled: boolean }
 	| { type: 'SET_GLOBAL_ENABLED'; enabled: boolean }
 	| { type: 'RESET' }

@@ -537,6 +537,55 @@ describe('content script', () => {
 		})
 	})
 
+	describe('keyboard shortcuts', () => {
+		const notice = () =>
+			document.querySelector('modulate-toast')?.shadowRoot?.querySelector('[role="status"]')
+				?.textContent
+
+		afterEach(() => document.querySelector('modulate-toast')?.remove())
+
+		it('shows what a shortcut changed on the page', async () => {
+			const cs = await startContentScript()
+			await send({ type: 'NUDGE_SEMITONES', delta: 1, fromShortcut: true })
+			expect(notice()).toBe('Pitch +1 st')
+			await send({ type: 'NUDGE_TEMPO', delta: TEMPO_STEP, fromShortcut: true })
+			expect(notice()).toBe('Tempo 1.05×')
+			cs.stop()
+		})
+
+		it('shows nothing for a change made in the popup', async () => {
+			const cs = await startContentScript()
+			await send({ type: 'NUDGE_SEMITONES', delta: 1 })
+			expect(notice()).toBeUndefined()
+			cs.stop()
+		})
+
+		// No controls are on screen to show a stored value moving while it is off.
+		it('changes nothing while switched off, and says so', async () => {
+			await setVideoSetting('vid1', { enabled: false, semitones: 2 })
+			const cs = await startContentScript()
+
+			await send({ type: 'NUDGE_SEMITONES', delta: 1, fromShortcut: true })
+			expect(notice()).toBe('Modulate is off for this video')
+			expect(await getRawVideoSetting('vid1')).toMatchObject({ semitones: 2 })
+
+			await setVideoSetting('vid1', { enabled: true })
+			await globalEnabled.setValue(false)
+			await send({ type: 'NUDGE_TEMPO', delta: TEMPO_STEP, fromShortcut: true })
+			expect(notice()).toBe('Modulate is off')
+			expect(await getRawVideoSetting('vid1')).toMatchObject({ tempo: 1 })
+			cs.stop()
+		})
+
+		it('says what to do off a video', async () => {
+			setUrl('https://www.youtube.com/feed/subscriptions')
+			const cs = await startContentScript()
+			await send({ type: 'NUDGE_SEMITONES', delta: 1, fromShortcut: true })
+			expect(notice()).toBe('Modulate: open a video to tune it')
+			cs.stop()
+		})
+	})
+
 	describe('Shorts and live', () => {
 		it('applies the setting saved for a Short', async () => {
 			setUrl('https://www.youtube.com/shorts/short1')

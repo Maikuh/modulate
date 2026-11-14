@@ -1,5 +1,6 @@
 import { storage } from 'wxt/utils/storage'
 
+import { formatSemitones } from '@/lib/format'
 import {
 	APPLY_EVENT,
 	PLAYING_EVENT,
@@ -21,6 +22,7 @@ import {
 	setVideoSetting,
 	watchVideoSettings,
 } from '@/lib/storage'
+import { removeToast, showToast } from '@/lib/toast'
 import { getVideoId, getVideoTitle } from '@/lib/youtube'
 
 /** Set on `ytd-app` while YouTube's miniplayer is open. */
@@ -241,9 +243,13 @@ export default defineContentScript({
 
 			// No clamping here — `setVideoSetting` clamps every write, so the ranges are
 			// enforced once at the storage boundary instead of at each call site.
+			const shortcut = 'fromShortcut' in msg && msg.fromShortcut === true
 			const nudge = (field: 'semitones' | 'tempo', delta: number) => async () => {
 				if (!videoId) return
 				const current = (await getRawVideoSetting(videoId)) ?? DEFAULT_VIDEO_SETTING
+				// The popup greys its controls out while off; a shortcut has no controls
+				// to grey, so it must not quietly move a value nobody can see.
+				if (shortcut && !(current.enabled && (await globalEnabled.getValue()))) return
 				await setVideoSetting(videoId, { [field]: current[field] + delta, title })
 			}
 			const write = (partial: Parameters<typeof setVideoSetting>[1]) => async () => {
@@ -291,7 +297,19 @@ export default defineContentScript({
 				// the popup's response isn't held up by graph build or context resume.
 				scheduleApply(msg.type)
 			}
-			return getState()
+			const state = await getState()
+			if (shortcut) showToast(shortcutNotice(msg.type, state))
+			return state
+		}
+
+		/** What a shortcut did, for the on-page notice. */
+		function shortcutNotice(type: PopupMessage['type'], state: PlayerState): string {
+			if (state.videoId == null) return 'Modulate: open a video to tune it'
+			if (!state.globalEnabled) return 'Modulate is off'
+			if (!state.enabled) return 'Modulate is off for this video'
+			return type === 'NUDGE_TEMPO'
+				? `Tempo ${state.tempo.toFixed(2)}×`
+				: `Pitch ${formatSemitones(state.semitones)} st`
 		}
 
 		browser.runtime.onMessage.addListener(
@@ -377,7 +395,10 @@ export default defineContentScript({
 			attributes: true,
 			attributeFilter: [MINIPLAYER_ATTR],
 		})
-		ctx.onInvalidated(() => miniplayerWatch.disconnect())
+		ctx.onInvalidated(() => {
+			miniplayerWatch.disconnect()
+			removeToast()
+		})
 
 		// WXT notices invalidation only when something reads `ctx.isValid` (which
 		// checks `browser.runtime.id`), or when a newer copy of this script starts. On

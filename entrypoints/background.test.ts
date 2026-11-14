@@ -204,10 +204,10 @@ describe('background — keyboard commands', () => {
 	})
 
 	it.each([
-		['modulate-pitch-up', { type: 'NUDGE_SEMITONES', delta: 1 }],
-		['modulate-pitch-down', { type: 'NUDGE_SEMITONES', delta: -1 }],
-		['modulate-tempo-up', { type: 'NUDGE_TEMPO', delta: TEMPO_STEP }],
-		['modulate-tempo-down', { type: 'NUDGE_TEMPO', delta: -TEMPO_STEP }],
+		['modulate-pitch-up', { type: 'NUDGE_SEMITONES', delta: 1, fromShortcut: true }],
+		['modulate-pitch-down', { type: 'NUDGE_SEMITONES', delta: -1, fromShortcut: true }],
+		['modulate-tempo-up', { type: 'NUDGE_TEMPO', delta: TEMPO_STEP, fromShortcut: true }],
+		['modulate-tempo-down', { type: 'NUDGE_TEMPO', delta: -TEMPO_STEP, fromShortcut: true }],
 	])('forwards %s to the active tab', async (command, expected) => {
 		const send = vi.spyOn(browser.tabs, 'sendMessage').mockResolvedValue(undefined)
 
