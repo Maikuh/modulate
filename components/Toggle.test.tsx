@@ -2,7 +2,7 @@ import { render, within } from '@testing-library/preact'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi } from 'vitest'
 
-import { Toggle } from './Toggle'
+import { Toggle } from '@/components/Toggle'
 
 // Scope queries to this render's container; `render` appends to document.body.
 function setup(props: Parameters<typeof Toggle>[0]) {

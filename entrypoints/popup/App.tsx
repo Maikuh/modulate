@@ -1,6 +1,7 @@
 import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 
+import { Toggle } from '@/components/Toggle'
 import { Logo, PitchIcon, TempoIcon, ResetIcon, GearIcon } from '@/lib/icons'
 import {
 	logSendFailure,
@@ -13,7 +14,6 @@ import {
 import { MIN_SEMITONES, MAX_SEMITONES, MIN_TEMPO, MAX_TEMPO, TEMPO_STEP } from '@/lib/settings'
 
 import { ControlRow } from './components/ControlRow'
-import { Toggle } from './components/Toggle'
 
 type SendResult =
 	/** The content script answered with the tab's state. */
