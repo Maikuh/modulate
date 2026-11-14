@@ -5,7 +5,7 @@ import type { BadgeMessage } from '@/lib/messaging'
 import { TEMPO_STEP } from '@/lib/settings'
 import { getRawVideoSetting } from '@/lib/storage'
 
-import background from './background'
+import background, { tooltip } from './background'
 
 /**
  * fakeBrowser defines unimplemented APIs as THROWING stubs rather than leaving
@@ -16,6 +16,7 @@ const action = {
 	setIcon: vi.fn().mockResolvedValue(undefined),
 	setBadgeText: vi.fn().mockResolvedValue(undefined),
 	setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
+	setTitle: vi.fn().mockResolvedValue(undefined),
 }
 
 let commandListener: ((command: string) => unknown) | undefined
@@ -120,6 +121,35 @@ describe('background — badge text', () => {
 	it('flags a failed engine instead of showing the setting', async () => {
 		await sendBadge(badge({ semitones: 3, status: 'error' }))
 		expect(badgeText()).toBe('!')
+	})
+})
+
+describe('background — tooltip', () => {
+	const title = () => action.setTitle.mock.calls.at(-1)?.[0]?.title
+
+	it('spells out both values the badge abbreviates', async () => {
+		await sendBadge(badge({ semitones: 3, tempo: 1.25 }))
+		expect(title()).toBe('Modulate: +3 st · 1.25×')
+		expect(action.setTitle).toHaveBeenLastCalledWith(expect.objectContaining({ tabId: 7 }))
+	})
+
+	it('says why the setting is not playing', () => {
+		expect(tooltip(badge({ semitones: -2, status: 'waiting-for-gesture' }))).toBe(
+			'Modulate: -2 st · 1.00× (click the page to start)',
+		)
+		expect(tooltip(badge({ tempo: 0.75, status: 'error' }))).toBe(
+			'Modulate: 0 st · 0.75× (audio failed; reload the tab)',
+		)
+	})
+
+	it('names the extension alone off a video, and the original values at the no-op', () => {
+		expect(tooltip(badge({ onVideo: false, semitones: 3 }))).toBe('Modulate')
+		expect(tooltip(badge())).toBe('Modulate: original pitch and speed')
+	})
+
+	it('resets on a full-document navigation', async () => {
+		await fakeBrowser.tabs.onUpdated.trigger(7, { status: 'loading' }, {} as never)
+		expect(action.setTitle).toHaveBeenLastCalledWith({ tabId: 7, title: 'Modulate' })
 	})
 })
 

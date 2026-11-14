@@ -1,3 +1,4 @@
+import { formatSemitones } from '@/lib/format'
 import { logSendFailure, type BadgeMessage, type PopupMessage } from '@/lib/messaging'
 import { TEMPO_STEP, isNoOp } from '@/lib/settings'
 import { migrateLegacyStorage } from '@/lib/storage'
@@ -8,6 +9,24 @@ const COMMAND_MESSAGES: Record<string, PopupMessage> = {
 	'modulate-pitch-down': { type: 'NUDGE_SEMITONES', delta: -1 },
 	'modulate-tempo-up': { type: 'NUDGE_TEMPO', delta: TEMPO_STEP },
 	'modulate-tempo-down': { type: 'NUDGE_TEMPO', delta: -TEMPO_STEP },
+}
+
+const NAME = 'Modulate'
+
+/**
+ * The toolbar tooltip for a tab: what the badge abbreviates, spelled out. The
+ * badge fits about four characters, so it shows the pitch or a glyph; hovering
+ * says both values, and why they aren't playing when they aren't.
+ */
+export function tooltip(message: BadgeMessage): string {
+	if (!message.onVideo) return NAME
+	if (isNoOp(message)) return `${NAME}: original pitch and speed`
+	const values = `${formatSemitones(message.semitones)} st · ${message.tempo.toFixed(2)}×`
+	if (message.status === 'error') return `${NAME}: ${values} (audio failed; reload the tab)`
+	if (message.status === 'waiting-for-gesture') {
+		return `${NAME}: ${values} (click the page to start)`
+	}
+	return `${NAME}: ${values}`
 }
 
 export default defineBackground(() => {
@@ -52,7 +71,12 @@ export default defineBackground(() => {
 	// own SPA navigations don't load a document, so the content script's badge
 	// message — not this — keeps the icon in sync while staying on YouTube.
 	browser.tabs.onUpdated.addListener((tabId, info) => {
-		if (info.status === 'loading') setIcon(tabId, false)
+		if (info.status !== 'loading') return
+		setIcon(tabId, false)
+		// The tooltip is a per-tab override too.
+		action
+			?.setTitle?.({ tabId, title: NAME })
+			?.catch?.((err: unknown) => logSendFailure('setTitle failed', err))
 	})
 
 	// Keyboard shortcuts: forward to the active tab's content script.
@@ -100,5 +124,6 @@ export default defineBackground(() => {
 		const onError = (err: unknown) => logSendFailure('badge update failed', err)
 		action.setBadgeText({ tabId, text })?.catch?.(onError)
 		action.setBadgeBackgroundColor?.({ tabId, color })?.catch?.(onError)
+		action.setTitle?.({ tabId, title: tooltip(message) })?.catch?.(onError)
 	})
 })
