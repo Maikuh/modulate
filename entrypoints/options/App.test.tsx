@@ -86,13 +86,52 @@ describe('options App', () => {
 		await waitFor(() => expect(globalSwitch()).not.toBeChecked())
 	})
 
-	it('clears all saved videos', async () => {
+	it('clears all saved videos once confirmed', async () => {
 		await setVideoSetting('a', { semitones: 1 })
 		await setVideoSetting('b', { semitones: 2 })
 		const { view } = renderApp()
 		await view.findByText('a')
+
 		await userEvent.click(view.getByRole('button', { name: /clear all/i }))
+		expect(view.getByText(/remove all 2 saved videos\?/i)).toBeInTheDocument()
+		expect(await listVideoSettings()).toHaveProperty('a') // nothing yet
+
+		await userEvent.click(view.getByRole('button', { name: /remove all/i }))
 		await waitFor(() => expect(view.queryByText('a')).not.toBeInTheDocument())
 		expect(await listVideoSettings()).toEqual({})
+	})
+
+	it('keeps everything when the clear is cancelled', async () => {
+		await setVideoSetting('a', { semitones: 1 })
+		const { view } = renderApp()
+		await view.findByText('a')
+
+		await userEvent.click(view.getByRole('button', { name: /clear all/i }))
+		const cancel = view.getByRole('button', { name: 'Cancel' })
+		expect(cancel).toHaveFocus() // the safe answer, so Enter can't wipe the list
+		await userEvent.click(cancel)
+
+		expect(view.getByRole('button', { name: /clear all/i })).toHaveFocus()
+		expect(await listVideoSettings()).toHaveProperty('a')
+	})
+
+	it('dismisses the question with Escape', async () => {
+		await setVideoSetting('a', { semitones: 1 })
+		const { view } = renderApp()
+		await view.findByText('a')
+
+		await userEvent.click(view.getByRole('button', { name: /clear all/i }))
+		await userEvent.keyboard('{Escape}')
+
+		expect(view.queryByRole('button', { name: /remove all/i })).not.toBeInTheDocument()
+		expect(await listVideoSettings()).toHaveProperty('a')
+	})
+
+	it('asks about one video in the singular', async () => {
+		await setVideoSetting('a', { semitones: 1 })
+		const { view } = renderApp()
+		await view.findByText('a')
+		await userEvent.click(view.getByRole('button', { name: /clear all/i }))
+		expect(view.getByText(/remove the saved video\?/i)).toBeInTheDocument()
 	})
 })

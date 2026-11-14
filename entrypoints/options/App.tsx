@@ -1,5 +1,5 @@
 import { useSignal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { storage } from 'wxt/utils/storage'
 
 import { formatSemitones } from '@/lib/format'
@@ -17,6 +17,10 @@ function App() {
 	const global = useSignal(true)
 	const videos = useSignal<Record<string, VideoSetting>>({})
 	const error = useSignal<string | null>(null)
+	/** "Clear all" was pressed once and waits for the second, confirming press. */
+	const confirmingClear = useSignal(false)
+	const cancelRef = useRef<HTMLButtonElement>(null)
+	const clearRef = useRef<HTMLButtonElement>(null)
 
 	async function refresh() {
 		const [g, v] = await Promise.all([globalEnabled.getValue(), listVideoSettings()])
@@ -83,6 +87,30 @@ function App() {
 	}
 
 	const videoEntries = Object.entries(videos.value)
+	// Nothing left to clear (removed one by one, or from another page).
+	if (videoEntries.length === 0) confirmingClear.value = false
+
+	// Focus follows the question: onto the safe answer when it is asked, back to the
+	// button that asked it when it is dismissed.
+	const asked = useRef(false)
+	useEffect(() => {
+		if (confirmingClear.value) cancelRef.current?.focus()
+		else if (asked.current) clearRef.current?.focus()
+		asked.current = confirmingClear.value
+	}, [confirmingClear.value])
+
+	const clearQuestion = `Remove ${
+		videoEntries.length === 1 ? 'the saved video' : `all ${videoEntries.length} saved videos`
+	}? This can't be undone.`
+
+	function dismissOnEscape(e: KeyboardEvent) {
+		if (e.key === 'Escape') confirmingClear.value = false
+	}
+
+	function clearAll() {
+		confirmingClear.value = false
+		void persist(() => clearVideoSettings())
+	}
 
 	return (
 		<div className="options">
@@ -204,14 +232,40 @@ function App() {
 									)
 								})}
 							</div>
-							<div className="vrow-actions">
-								<button
-									className="btn btn--danger"
-									onClick={() => void persist(() => clearVideoSettings())}
-								>
-									Clear all
-								</button>
-							</div>
+							{confirmingClear.value ? (
+								<div className="vrow-actions">
+									<span id="clear-question" className="vrow-actions__question">
+										{clearQuestion}
+									</span>
+									<button
+										ref={cancelRef}
+										className="btn"
+										aria-describedby="clear-question"
+										onClick={() => (confirmingClear.value = false)}
+										onKeyDown={dismissOnEscape}
+									>
+										Cancel
+									</button>
+									<button
+										className="btn btn--danger"
+										aria-describedby="clear-question"
+										onClick={clearAll}
+										onKeyDown={dismissOnEscape}
+									>
+										Remove all
+									</button>
+								</div>
+							) : (
+								<div className="vrow-actions">
+									<button
+										ref={clearRef}
+										className="btn btn--danger"
+										onClick={() => (confirmingClear.value = true)}
+									>
+										Clear all
+									</button>
+								</div>
+							)}
 						</>
 					)}
 				</div>
