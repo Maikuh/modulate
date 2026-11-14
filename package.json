@@ -19,6 +19,7 @@
 		"format:check": "oxfmt --check",
 		"test": "vitest run",
 		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage",
 		"postinstall": "wxt prepare",
 		"postversion": "git push --follow-tags"
 	},
@@ -32,6 +33,7 @@
 		"@testing-library/jest-dom": "^7.0.1",
 		"@testing-library/preact": "^3.2.6",
 		"@testing-library/user-event": "^14.6.8",
+		"@vitest/coverage-v8": "5.1.0",
 		"@wxt-dev/auto-icons": "^1.1.2",
 		"happy-dom": "^21.0.4",
 		"oxfmt": "^0.76.0",
