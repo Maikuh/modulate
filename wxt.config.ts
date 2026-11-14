@@ -9,7 +9,10 @@ export default defineConfig({
 		name: 'Modulate',
 		description:
 			'Transpose YouTube audio by semitones and change its speed without changing pitch, per video.',
-		permissions: ['storage'],
+		// `activeTab`: opening the popup grants it the active tab's URL (no install
+		// warning), which tells a YouTube tab that predates an install or update — and
+		// so has no content script yet — apart from a tab on another site.
+		permissions: ['storage', 'activeTab'],
 		// Grayscale toolbar icon by default; the background script swaps in the
 		// colored set per tab while on a video (see entrypoints/background.ts). The
 		// disabled set is produced by modules/generate-disabled-icons.ts.
