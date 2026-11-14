@@ -22,7 +22,8 @@ browser's native pitch-preserving playback rate.
 
 - **Pitch transpose** — shift audio ±12 semitones without changing speed.
 - **Tempo / speed** — 0.5×–2× playback with pitch held constant (no chipmunk effect).
-- **Per-video state** — each YouTube video keeps its own settings, keyed by video ID.
+- **Per-video state** — each YouTube video keeps its own settings, keyed by video ID —
+  watch pages, Shorts, live streams, and videos playing in the miniplayer.
 - **Global + per-video toggles** — a master switch plus an on/off per video.
 - **Keyboard shortcuts** — nudge pitch/tempo without opening the popup:
   - `Alt+Shift+Up` / `Alt+Shift+Down` — pitch up / down a semitone

@@ -4,6 +4,7 @@ import { ContentScriptContext } from 'wxt/utils/content-script-context'
 
 import {
 	APPLY_EVENT,
+	PLAYING_EVENT,
 	STATUS_EVENT,
 	type ApplyMessage,
 	type PlayerState,
@@ -86,6 +87,13 @@ async function startContentScript({ injection = 'load' }: { injection?: 'load' |
 			channel.dispatchEvent(
 				new CustomEvent(STATUS_EVENT, {
 					detail: JSON.stringify({ source: 'modulate-page', type: 'status', status }),
+				}),
+			),
+		/** Report, as the page does, which video the main player holds. */
+		playing: (videoId: unknown, title: string | null = null) =>
+			channel.dispatchEvent(
+				new CustomEvent(PLAYING_EVENT, {
+					detail: JSON.stringify({ source: 'modulate-page', type: 'playing', videoId, title }),
 				}),
 			),
 		/** Clear both the posted payloads and the badge-message spy. */
@@ -526,6 +534,142 @@ describe('content script', () => {
 			await tick()
 
 			expect(cs.applies().at(-1)).toMatchObject({ semitones: 0, tempo: 1 })
+		})
+	})
+
+	describe('Shorts and live', () => {
+		it('applies the setting saved for a Short', async () => {
+			setUrl('https://www.youtube.com/shorts/short1')
+			await setVideoSetting('short1', { semitones: -2 })
+			const cs = await startContentScript()
+			expect(cs.applies().at(-1)).toMatchObject({ semitones: -2 })
+			expect(await send({ type: 'GET_STATE' })).toMatchObject({ videoId: 'short1' })
+			cs.stop()
+		})
+
+		it('saves a change made on a live stream under its id', async () => {
+			setUrl('https://www.youtube.com/live/live1')
+			const cs = await startContentScript()
+			await send({ type: 'NUDGE_SEMITONES', delta: 1 })
+			expect(await getRawVideoSetting('live1')).toMatchObject({ semitones: 1 })
+			cs.stop()
+		})
+	})
+
+	// The miniplayer keeps playing over the feed, whose URL names no video.
+	describe('miniplayer', () => {
+		const FEED = 'https://www.youtube.com/'
+
+		function miniplayer(open: boolean): void {
+			let app = document.querySelector('ytd-app')
+			if (!app) {
+				app = document.createElement('ytd-app')
+				document.body.append(app)
+			}
+			app.toggleAttribute('miniplayer-is-active', open)
+		}
+
+		beforeEach(async () => {
+			setUrl(FEED)
+			await setVideoSetting('mini1', { semitones: 2 })
+			await setVideoSetting('mini2', { semitones: 5, tempo: 1.25 })
+		})
+
+		it("applies the miniplayer video's setting over the feed", async () => {
+			miniplayer(true)
+			const cs = await startContentScript()
+			cs.reset()
+
+			cs.playing('mini1', 'Mini one')
+			await tick()
+
+			expect(cs.applies().at(-1)).toMatchObject({ semitones: 2 })
+			expect(await send({ type: 'GET_STATE' })).toMatchObject({ videoId: 'mini1', semitones: 2 })
+			expect(browser.runtime.sendMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ onVideo: true, semitones: 2 }),
+			)
+			cs.stop()
+		})
+
+		it("saves a change made there under the miniplayer video, with the player's title", async () => {
+			miniplayer(true)
+			const cs = await startContentScript()
+			cs.playing('mini1', 'Mini one')
+			await tick()
+
+			await send({ type: 'NUDGE_SEMITONES', delta: 1 })
+
+			expect(await getRawVideoSetting('mini1')).toMatchObject({ semitones: 3, title: 'Mini one' })
+			cs.stop()
+		})
+
+		// It autoplays the next video without a navigation.
+		it('follows the miniplayer to the next video', async () => {
+			miniplayer(true)
+			const cs = await startContentScript()
+			cs.playing('mini1')
+			await tick()
+			cs.reset()
+
+			cs.playing('mini2')
+			await tick()
+
+			expect(cs.applies()).toEqual([expect.objectContaining({ semitones: 5, tempo: 1.25 })])
+			cs.stop()
+		})
+
+		it('applies on opening it, and stands down on closing it', async () => {
+			const cs = await startContentScript()
+			cs.playing('mini1')
+			await tick()
+			expect(cs.applies().at(-1)).toMatchObject({ semitones: 0, tempo: 1 })
+			cs.reset()
+
+			miniplayer(true)
+			await tick()
+			expect(cs.applies()).toEqual([expect.objectContaining({ semitones: 2 })])
+
+			// The player keeps the closed video's id; only the attribute says it's gone.
+			miniplayer(false)
+			await tick()
+			expect(cs.applies().at(-1)).toMatchObject({ semitones: 0, tempo: 1 })
+			expect(await send({ type: 'GET_STATE' })).toMatchObject({ videoId: null })
+			cs.stop()
+		})
+
+		it('ignores a rewrite of the attribute that changes nothing', async () => {
+			miniplayer(true)
+			const cs = await startContentScript()
+			cs.playing('mini1')
+			await tick()
+			cs.reset()
+
+			document.querySelector('ytd-app')!.setAttribute('miniplayer-is-active', '')
+			await tick()
+
+			expect(cs.applies()).toHaveLength(0)
+			cs.stop()
+		})
+
+		it('lets the URL win on a watch page', async () => {
+			setUrl(WATCH_URL)
+			miniplayer(true)
+			const cs = await startContentScript()
+			cs.playing('mini1')
+			await tick()
+			expect(await send({ type: 'GET_STATE' })).toMatchObject({ videoId: 'vid1' })
+			cs.stop()
+		})
+
+		// Anything in the page can post one; the id becomes a storage key.
+		it('ignores a reported id no video could have', async () => {
+			miniplayer(true)
+			const cs = await startContentScript()
+			cs.playing('../globalEnabled')
+			cs.playing(42)
+			await tick()
+			expect(await send({ type: 'GET_STATE' })).toMatchObject({ videoId: null })
+			cs.stop()
 		})
 	})
 

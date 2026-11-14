@@ -11,10 +11,30 @@ describe('getVideoId', () => {
 		expect(getVideoId('https://m.youtube.com/watch?v=abc123')).toBe('abc123')
 	})
 
-	// getVideoId only recognises `?v=` watch URLs — Shorts and other paths have no
-	// per-video setting to apply, so they resolve to null.
-	it('returns null for shorts URLs', () => {
-		expect(getVideoId('https://www.youtube.com/shorts/abc123')).toBeNull()
+	it('extracts the id from a Shorts URL', () => {
+		expect(getVideoId('https://www.youtube.com/shorts/abc123')).toBe('abc123')
+		expect(getVideoId('https://www.youtube.com/shorts/abc123/?feature=share')).toBe('abc123')
+	})
+
+	it('extracts the id from a live URL', () => {
+		expect(getVideoId('https://www.youtube.com/live/abc123?si=x')).toBe('abc123')
+	})
+
+	it('returns null for the bare Shorts and live paths', () => {
+		expect(getVideoId('https://www.youtube.com/shorts/')).toBeNull()
+		expect(getVideoId('https://www.youtube.com/live')).toBeNull()
+		expect(getVideoId('https://www.youtube.com/shorts/abc/extra')).toBeNull()
+	})
+
+	// The id becomes a storage key and part of a URL.
+	it('rejects an id with characters no video id has', () => {
+		expect(getVideoId('https://www.youtube.com/watch?v=abc$')).toBeNull()
+		expect(getVideoId('https://www.youtube.com/watch?v=a%2Fb')).toBeNull()
+		expect(getVideoId('https://www.youtube.com/shorts/a%20b')).toBeNull()
+	})
+
+	it('reads ?v= only on the watch page', () => {
+		expect(getVideoId('https://www.youtube.com/results?v=abc123')).toBeNull()
 	})
 
 	it('returns null for non-watch YouTube paths', () => {
@@ -109,6 +129,19 @@ describe('getVideoTitle', () => {
 	// Known gap, pinned so a change in behavior is deliberate: the staleness guard
 	// needs ytd-watch-flexy to exist AND carry a video-id. Before it mounts there is
 	// nothing to compare against, so document.title -- equally stale -- gets through.
+	// On Shorts, or behind the miniplayer, the watch element (and the meta tags) still
+	// describe the last watch page.
+	it('skips a hidden watch element and its meta tags', () => {
+		mountWatchPage({
+			videoId: 'old',
+			h1: 'Old video',
+			meta: 'Old video',
+			documentTitle: 'A short - YouTube',
+		})
+		document.querySelector('ytd-watch-flexy')!.setAttribute('hidden', '')
+		expect(getVideoTitle('abc')).toBe('A short')
+	})
+
 	it('cannot detect staleness before the watch element mounts', () => {
 		mountWatchPage({ videoId: null, documentTitle: 'Previous Video - YouTube' })
 		expect(getVideoTitle('current')).toBe('Previous Video')

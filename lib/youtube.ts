@@ -1,23 +1,37 @@
 /**
+ * Whether `id` can be a YouTube video ID. Real IDs are 11 base64url characters;
+ * the check is only as strict as storage needs: the ID becomes part of a storage
+ * key and a URL, so nothing outside `[A-Za-z0-9_-]` gets through.
+ */
+export function isVideoId(id: unknown): id is string {
+	return typeof id === 'string' && /^[\w-]{1,64}$/.test(id)
+}
+
+/**
  * Extract the YouTube video ID from a URL.
  *
- * Handles standard watch URLs (`youtube.com/watch?v=ID`). Returns `null` when
- * the URL is not a watch page (e.g. the home feed, channel pages, Shorts), in
- * which case there is no per-video setting to apply.
+ * Handles watch URLs (`/watch?v=ID`), Shorts (`/shorts/ID`) and live streams
+ * (`/live/ID`). Returns `null` anywhere else (the home feed, channel pages,
+ * search), where the URL names no video — though one may still be playing in
+ * the miniplayer, which only the page can tell (see `content.ts`).
  */
 export function getVideoId(url: string): string | null {
+	let u: URL
 	try {
-		const u = new URL(url)
-		if (!/(^|\.)youtube\.com$/.test(u.hostname)) return null
-		// Normalize `?v=` with no value to null. `searchParams.get` hands back `''`,
-		// which is falsy for the `if (videoId)` write guards but truthy for the
-		// `videoId != null` checks that drive the toolbar icon and the popup's
-		// on-a-video state — so the popup would render full working-looking controls
-		// whose every action is silently dropped.
-		return u.searchParams.get('v') || null
+		u = new URL(url)
 	} catch {
 		return null
 	}
+	if (!/(^|\.)youtube\.com$/.test(u.hostname)) return null
+	// `searchParams.get` hands back `''` for a valueless `?v=`, which would be falsy
+	// for the `if (videoId)` write guards but truthy for the `videoId != null`
+	// checks that drive the toolbar icon and the popup — controls whose every
+	// action is silently dropped. `isVideoId` rejects it.
+	const id =
+		u.pathname === '/watch'
+			? u.searchParams.get('v')
+			: /^\/(?:shorts|live)\/([^/]+)\/?$/.exec(u.pathname)?.[1]
+	return isVideoId(id) ? id : null
 }
 
 /**
@@ -37,16 +51,21 @@ export function getVideoId(url: string): string | null {
  */
 export function getVideoTitle(expectedId?: string | null): string | null {
 	const flexy = document.querySelector('ytd-watch-flexy')
-	const current = flexy?.getAttribute('video-id')
-	if (expectedId && current && current !== expectedId) return null
+	// A hidden watch element (on Shorts, or behind the miniplayer) describes the last
+	// watch page, not this one; so do the meta tags it keeps up to date. Only the
+	// document title follows every page.
+	if (!flexy?.hasAttribute('hidden')) {
+		const current = flexy?.getAttribute('video-id')
+		if (expectedId && current && current !== expectedId) return null
 
-	const h1 = flexy
-		?.querySelector<HTMLElement>('ytd-watch-metadata h1, #title h1')
-		?.textContent?.trim()
-	if (h1) return h1
+		const h1 = flexy
+			?.querySelector<HTMLElement>('ytd-watch-metadata h1, #title h1')
+			?.textContent?.trim()
+		if (h1) return h1
 
-	const meta = document.querySelector<HTMLMetaElement>('meta[name="title"]')?.content?.trim()
-	if (meta) return meta
+		const meta = document.querySelector<HTMLMetaElement>('meta[name="title"]')?.content?.trim()
+		if (meta) return meta
+	}
 
 	const fromTitle = document.title
 		.replace(/^\(\d+\)\s*/, '')

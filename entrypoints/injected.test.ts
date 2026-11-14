@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-import { APPLY_EVENT, STATUS_EVENT, type ApplyMessage } from '@/lib/messaging'
+import { APPLY_EVENT, PLAYING_EVENT, STATUS_EVENT, type ApplyMessage } from '@/lib/messaging'
 
 // The real engine needs an AudioContext, which happy-dom does not implement. These
 // tests are about the MAIN-world script's own logic — what it decides to call, and
@@ -89,16 +89,18 @@ async function tick(times = 6) {
  * the test holding a stale instance.
  */
 let teardown: Array<() => void> = []
-let recording: { mockRestore(): void } | null = null
+let recording: Array<{ mockRestore(): void }> | null = null
 function start(script: HTMLElement = document.createElement('script')): HTMLElement {
 	if (!recording) {
-		const added = window.addEventListener.bind(window)
-		recording = vi
-			.spyOn(window, 'addEventListener')
-			.mockImplementation((type, fn: EventListenerOrEventListenerObject, opts) => {
-				teardown.push(() => window.removeEventListener(type, fn, opts))
-				added(type, fn, opts)
-			})
+		recording = [window, document].map((target: EventTarget) => {
+			const added = target.addEventListener.bind(target)
+			return vi
+				.spyOn(target, 'addEventListener')
+				.mockImplementation((type, fn: EventListenerOrEventListenerObject | null, opts) => {
+					teardown.push(() => target.removeEventListener(type, fn, opts))
+					added(type, fn, opts)
+				})
+		})
 	}
 	// Only set while a script executes; the instance reads it synchronously at start.
 	Object.defineProperty(document, 'currentScript', { value: script, configurable: true })
@@ -137,7 +139,7 @@ beforeEach(() => {
 afterEach(() => {
 	Reflect.deleteProperty(window, INSTANCE_KEY)
 	channel = undefined as unknown as HTMLElement
-	recording?.mockRestore()
+	recording?.forEach((spy) => spy.mockRestore())
 	recording = null
 	teardown.forEach((off) => off())
 	teardown = []
@@ -243,6 +245,131 @@ describe('injected script — element resolution', () => {
 		start()
 		await post(message({ semitones: 1 }))
 		expect(engine.ensureGraph).toHaveBeenCalledWith(only, PROCESSOR_URL)
+	})
+})
+
+describe('injected script — player resolution', () => {
+	/** A YouTube player container holding a <video>. */
+	function mountPlayer(id: string): HTMLVideoElement {
+		const player = document.createElement('div')
+		player.id = id
+		const video = document.createElement('video')
+		video.className = 'html5-main-video'
+		player.append(video)
+		document.body.append(player)
+		return video
+	}
+
+	const happyWindow = window as Window & { happyDOM?: { setURL?: (url: string) => void } }
+	afterEach(() => happyWindow.happyDOM?.setURL?.('http://localhost:3000/'))
+
+	// Feed previews use the player markup too.
+	it("prefers the main player's video over one that precedes it", async () => {
+		mountPlayer('inline-player')
+		const main = mountPlayer('movie_player')
+		start()
+		await post(message({ semitones: 1 }))
+		expect(engine.ensureGraph).toHaveBeenCalledWith(main, PROCESSOR_URL)
+	})
+
+	// Once both have been visited, both players stay in the page.
+	it('takes the Shorts player on a Shorts page', async () => {
+		happyWindow.happyDOM?.setURL?.('https://www.youtube.com/shorts/abc123')
+		mountPlayer('movie_player')
+		const short = mountPlayer('shorts-player')
+		start()
+		await post(message({ semitones: 1 }))
+		expect(engine.ensureGraph).toHaveBeenCalledWith(short, PROCESSOR_URL)
+	})
+})
+
+describe('injected script — playing reports', () => {
+	let current: { video_id?: unknown; title?: unknown } | undefined
+	let video: HTMLVideoElement
+
+	/** The main player, with the one API method the script reads. */
+	function mountMainPlayer(getVideoData = () => current): HTMLVideoElement {
+		const player = Object.assign(document.createElement('div'), { getVideoData })
+		player.id = 'movie_player'
+		const el = document.createElement('video')
+		player.append(el)
+		document.body.append(player)
+		return el
+	}
+
+	function collectPlaying(target: EventTarget = channel): unknown[] {
+		const seen: unknown[] = []
+		target.addEventListener(PLAYING_EVENT, (e) => {
+			const { videoId, title } = JSON.parse((e as CustomEvent<string>).detail) as {
+				videoId: string
+				title: string | null
+			}
+			seen.push({ videoId, title })
+		})
+		return seen
+	}
+
+	beforeEach(() => {
+		current = undefined
+		video = mountMainPlayer()
+	})
+
+	// The miniplayer autoplays the next video over the feed, with no navigation.
+	it('reports a new video when the main player loads one', () => {
+		start()
+		const seen = collectPlaying()
+
+		current = { video_id: 'next123', title: 'Next' }
+		video.dispatchEvent(new Event('loadstart'))
+
+		expect(seen).toEqual([{ videoId: 'next123', title: 'Next' }])
+	})
+
+	it('reports each video once', () => {
+		start()
+		const seen = collectPlaying()
+		current = { video_id: 'a', title: 'A' }
+
+		for (const type of ['loadstart', 'loadeddata', 'playing']) video.dispatchEvent(new Event(type))
+		current = { video_id: 'b', title: 'B' }
+		video.dispatchEvent(new Event('playing'))
+
+		expect(seen).toEqual([
+			{ videoId: 'a', title: 'A' },
+			{ videoId: 'b', title: 'B' },
+		])
+	})
+
+	it('tells a newly adopted channel what is already playing', () => {
+		current = { video_id: 'a', title: 'A' }
+		const script = document.createElement('script')
+		const seen = collectPlaying(script)
+		start(script)
+		expect(seen).toEqual([{ videoId: 'a', title: 'A' }])
+	})
+
+	it('ignores media events from other players', () => {
+		start()
+		const seen = collectPlaying()
+		current = { video_id: 'a' }
+		mountVideo('preview').dispatchEvent(new Event('loadstart'))
+		expect(seen).toEqual([])
+	})
+
+	// YouTube's API, not ours: nothing it does may break the page.
+	it('survives a player API that throws or answers nonsense', () => {
+		document.body.innerHTML = ''
+		const el = mountMainPlayer(() => {
+			throw new Error('player not ready')
+		})
+		start()
+		const seen = collectPlaying()
+		expect(() => el.dispatchEvent(new Event('loadstart'))).not.toThrow()
+
+		document.body.innerHTML = ''
+		const other = mountMainPlayer(() => ({ video_id: 42 }))
+		other.dispatchEvent(new Event('loadstart'))
+		expect(seen).toEqual([])
 	})
 })
 

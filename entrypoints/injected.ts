@@ -1,10 +1,12 @@
 import { AudioBlockedError, audioEngine } from '@/lib/audioEngine'
 import {
 	APPLY_EVENT,
+	PLAYING_EVENT,
 	STATUS_EVENT,
 	parseApplyMessage,
 	type ApplyMessage,
 	type AudioStatus,
+	type PlayingMessage,
 	type StatusMessage,
 } from '@/lib/messaging'
 import { NO_OP, isNoOp } from '@/lib/settings'
@@ -53,12 +55,18 @@ export default defineUnlistedScript(() => {
 
 	/** Find the player's media element (mounts late on first load). */
 	function findVideo(): HTMLVideoElement | null {
-		// Two queries rather than one selector list: `querySelector` returns the first
-		// match in TREE order, so `'video.html5-main-video, video'` hands back any
-		// stray <video> that happens to precede the player (feed hover-previews,
-		// inline players) and the specific selector never wins. Capture is one-shot
-		// and irreversible, so binding the wrong element cannot be undone.
+		// Separate queries rather than one selector list: `querySelector` returns the
+		// first match in TREE order, so a list hands back any stray <video> that
+		// happens to precede the player (feed hover-previews, inline players) and the
+		// specific selector never wins. Capture is one-shot and irreversible, so
+		// binding the wrong element cannot be undone.
+		//
+		// Shorts play in a player of their own, and once both have been visited both
+		// stay in the page: the URL says which one is in use. The main player also
+		// plays the miniplayer, over the feed.
+		const player = location.pathname.startsWith('/shorts/') ? '#shorts-player' : '#movie_player'
 		return (
+			document.querySelector<HTMLVideoElement>(`${player} video`) ??
 			document.querySelector<HTMLVideoElement>('video.html5-main-video') ??
 			document.querySelector<HTMLVideoElement>('video')
 		)
@@ -287,6 +295,53 @@ export default defineUnlistedScript(() => {
 		return 'applied'
 	}
 
+	/** YouTube's player element, with the part of its API we read. */
+	type Player = HTMLElement & {
+		getVideoData?: () => { video_id?: unknown; title?: unknown } | undefined
+	}
+
+	/** The last video reported as playing in the main player. */
+	let playing: string | null = null
+
+	/**
+	 * Tell the content script which video the main player holds, when that changed.
+	 * Only the player API knows once the URL stops naming it: the miniplayer plays
+	 * over the feed, and autoplays the next video there without a navigation. During
+	 * an ad it still names the video the ad runs before.
+	 */
+	function reportPlaying(): void {
+		let data: ReturnType<NonNullable<Player['getVideoData']>>
+		try {
+			data = document.querySelector<Player>('#movie_player')?.getVideoData?.()
+		} catch {
+			return // YouTube's API, not ours: a throw here must not break the page.
+		}
+		const videoId = data?.video_id
+		if (typeof videoId !== 'string' || !videoId || videoId === playing) return
+		playing = videoId
+		const msg: PlayingMessage = {
+			source: 'modulate-page',
+			type: 'playing',
+			videoId,
+			title: typeof data?.title === 'string' ? data.title : null,
+		}
+		const detail = JSON.stringify(msg)
+		for (const ch of channels) ch.dispatchEvent(new CustomEvent(PLAYING_EVENT, { detail }))
+	}
+
+	// Media events don't bubble, but a capturing listener on the document hears every
+	// element's. `loadstart` marks a new video (or ad) loading; by `loadeddata` and
+	// `playing` the player API has caught up with it.
+	for (const type of ['loadstart', 'loadeddata', 'playing']) {
+		document.addEventListener(
+			type,
+			(event) => {
+				if ((event.target as Element).closest?.('#movie_player')) reportPlaying()
+			},
+			true,
+		)
+	}
+
 	function onApply(event: Event): void {
 		const detail = (event as CustomEvent<unknown>).detail
 		if (typeof detail !== 'string') return
@@ -302,6 +357,9 @@ export default defineUnlistedScript(() => {
 		if (channels.has(ch)) return
 		channels.add(ch)
 		ch.addEventListener(APPLY_EVENT, onApply)
+		// A new listener knows nothing yet: tell it what the player already holds.
+		playing = null
+		reportPlaying()
 	}
 	page[INSTANCE_KEY] = adopt
 	adopt(channel)

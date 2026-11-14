@@ -16,10 +16,11 @@
  * not `window.postMessage`, which every script in the page can read and forge.
  *
  * Imported by the MAIN-world bundle, so it must stay free of extension APIs
- * (it pulls only the side-effect-free `settings` module).
+ * (it pulls only the side-effect-free `settings` and `youtube` modules).
  */
 
 import { clampSemitones, clampTempo, type ResolvedSetting } from '@/lib/settings'
+import { isVideoId } from '@/lib/youtube'
 
 export type PopupMessage =
 	| { type: 'GET_STATE' }
@@ -71,6 +72,8 @@ export interface BadgeMessage {
 export const APPLY_EVENT = 'modulate:apply'
 /** CustomEvent (on the injected `<script>`) carrying a `StatusMessage` JSON string. */
 export const STATUS_EVENT = 'modulate:status'
+/** CustomEvent (on the injected `<script>`) carrying a `PlayingMessage` JSON string. */
+export const PLAYING_EVENT = 'modulate:playing'
 
 /**
  * Command sent from the content script to the main-world `injected` script as the
@@ -160,6 +163,39 @@ export function parseStatusMessage(raw: string): AudioStatus | null {
 	const m = parsed as Record<string, unknown>
 	if (m.source !== 'modulate-page' || m.type !== 'status') return null
 	return AUDIO_STATUSES.includes(m.status as AudioStatus) ? (m.status as AudioStatus) : null
+}
+
+/**
+ * Sent from the main-world script to the content script: the video the page's
+ * main player holds, read from YouTube's player API (MAIN world only). The URL
+ * names the video on a watch page, but not in the miniplayer, which keeps playing
+ * over the feed and autoplays the next video without a navigation.
+ */
+export interface PlayingMessage {
+	source: 'modulate-page'
+	type: 'playing'
+	videoId: string
+	title: string | null
+}
+
+/**
+ * Parse a `PlayingMessage`, or null if it isn't one. Anything in the MAIN world
+ * can post one, so the id is held to the shape `getVideoId` accepts: it becomes a
+ * storage key. A forged one can only pick which of the viewer's own saved
+ * settings the miniplayer gets, or where a change made there is saved.
+ */
+export function parsePlayingMessage(raw: string): { videoId: string; title: string | null } | null {
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(raw)
+	} catch {
+		return null
+	}
+	if (typeof parsed !== 'object' || parsed === null) return null
+	const m = parsed as Record<string, unknown>
+	if (m.source !== 'modulate-page' || m.type !== 'playing' || !isVideoId(m.videoId)) return null
+	const title = typeof m.title === 'string' && m.title.trim() ? m.title.trim() : null
+	return { videoId: m.videoId, title }
 }
 
 /** Narrow to a finite number — rejects NaN, Infinity, strings and undefined. */

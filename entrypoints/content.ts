@@ -2,8 +2,10 @@ import { storage } from 'wxt/utils/storage'
 
 import {
 	APPLY_EVENT,
+	PLAYING_EVENT,
 	STATUS_EVENT,
 	logSendFailure,
+	parsePlayingMessage,
 	parseStatusMessage,
 	type ApplyMessage,
 	type AudioStatus,
@@ -20,6 +22,9 @@ import {
 	watchVideoSettings,
 } from '@/lib/storage'
 import { getVideoId, getVideoTitle } from '@/lib/youtube'
+
+/** Set on `ytd-app` while YouTube's miniplayer is open. */
+const MINIPLAYER_ATTR = 'miniplayer-is-active'
 
 /** How often to check whether the extension was disabled, updated or removed. */
 export const INVALIDATION_POLL_MS = 1000
@@ -93,9 +98,43 @@ export default defineContentScript({
 			if (status) setAudioStatus(status)
 		})
 
+		/** What the page's main player holds, as the page last reported it. */
+		let playing: { videoId: string; title: string | null } | null = null
+
+		ctx.addEventListener(channel, PLAYING_EVENT, (event: Event) => {
+			const detail = (event as CustomEvent<unknown>).detail
+			if (typeof detail !== 'string') return
+			const next = parsePlayingMessage(detail)
+			if (!next || next.videoId === playing?.videoId) return
+			playing = next
+			// The miniplayer moved on to another video (autoplay) with no navigation.
+			if (getVideoId(location.href) == null && miniplayerActive()) {
+				scheduleApply('miniplayer-video')
+			}
+		})
+
+		/** Whether YouTube's miniplayer is open (it plays over the feed). */
+		function miniplayerActive(): boolean {
+			return document.querySelector('ytd-app')?.hasAttribute(MINIPLAYER_ATTR) ?? false
+		}
+
+		/**
+		 * The video this tab is on: the one the URL names, or the miniplayer's while it
+		 * plays over a page that names none. Only while it is open: the player keeps
+		 * the last video's ID after the miniplayer closes.
+		 */
+		function currentVideo(): { videoId: string | null; title: string | undefined } {
+			const fromUrl = getVideoId(location.href)
+			if (fromUrl != null) return { videoId: fromUrl, title: getVideoTitle(fromUrl) ?? undefined }
+			if (playing && miniplayerActive()) {
+				return { videoId: playing.videoId, title: playing.title ?? undefined }
+			}
+			return { videoId: null, title: undefined }
+		}
+
 		/** Read the state the popup needs to render the controls. */
 		async function getState(): Promise<PlayerState> {
-			const videoId = getVideoId(location.href)
+			const { videoId } = currentVideo()
 			const global = await globalEnabled.getValue()
 			const setting = (videoId && (await getRawVideoSetting(videoId))) || DEFAULT_VIDEO_SETTING
 			return {
@@ -129,7 +168,7 @@ export default defineContentScript({
 		async function apply(): Promise<void> {
 			if (!ctx.isValid) return
 			const seq = ++applySeq
-			const videoId = getVideoId(location.href)
+			const { videoId } = currentVideo()
 			// Independent reads — fetch them concurrently rather than serially.
 			const [global, video] = await Promise.all([
 				globalEnabled.getValue(),
@@ -196,10 +235,9 @@ export default defineContentScript({
 		}
 
 		async function handle(msg: PopupMessage): Promise<PlayerState> {
-			const videoId = getVideoId(location.href)
 			// Capture the readable title alongside any save so the options list is
-			// legible. `?? undefined` so a null title doesn't clobber a stored one.
-			const title = getVideoTitle(videoId) ?? undefined
+			// legible. Undefined (never null) when unknown, so it can't clobber a stored one.
+			const { videoId, title } = currentVideo()
 
 			// No clamping here — `setVideoSetting` clamps every write, so the ranges are
 			// enforced once at the storage boundary instead of at each call site.
@@ -301,7 +339,7 @@ export default defineContentScript({
 		// own video matters: a write for any other video changes nothing here.
 		const unwatchers = [
 			watchVideoSettings((ids) => {
-				const videoId = getVideoId(location.href)
+				const { videoId } = currentVideo()
 				if (videoId && ids.includes(videoId)) scheduleApply('videoSettings')
 			}),
 			storage.watch('local:globalEnabled', () => scheduleApply('globalEnabled')),
@@ -321,6 +359,25 @@ export default defineContentScript({
 				}
 			}
 		})
+
+		// Opening or closing the miniplayer changes which video this tab is on without
+		// a navigation of its own: opening it is one (to the feed, which `currentVideo`
+		// then resolves to the miniplayer's video), but closing it is not.
+		// Records fire on every write of the attribute, a rewrite of the same state
+		// included: act on changes only.
+		let miniplayerWas = miniplayerActive()
+		const miniplayerWatch = new MutationObserver(() => {
+			const now = miniplayerActive()
+			if (now === miniplayerWas) return
+			miniplayerWas = now
+			scheduleApply('miniplayer')
+		})
+		miniplayerWatch.observe(document.documentElement, {
+			subtree: true,
+			attributes: true,
+			attributeFilter: [MINIPLAYER_ATTR],
+		})
+		ctx.onInvalidated(() => miniplayerWatch.disconnect())
 
 		// WXT notices invalidation only when something reads `ctx.isValid` (which
 		// checks `browser.runtime.id`), or when a newer copy of this script starts. On
