@@ -59,10 +59,11 @@ describe('ControlRow', () => {
 	})
 
 	it('disables all controls when disabled', () => {
-		const { view, decrease, increase } = setup({ value: 0, disabled: true })
+		const { view, decrease, increase } = setup({ value: 3, disabled: true })
 		expect(decrease()).toBeDisabled()
 		expect(increase()).toBeDisabled()
 		expect(view.getByRole('slider')).toBeDisabled()
+		expect(view.getByRole('button', { name: 'Reset Pitch' })).toBeDisabled()
 	})
 
 	it('sets each value the slider passes while it is dragged', () => {

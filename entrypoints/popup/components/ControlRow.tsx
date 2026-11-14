@@ -73,7 +73,13 @@ export function ControlRow({
 				</span>
 				<span className="ctrl__readout">
 					{shown !== resetValue && (
-						<button className="ctrl__reset" onClick={onReset} aria-label={`Reset ${label}`}>
+						<button
+							className="ctrl__reset"
+							onClick={onReset}
+							// The row's dimming stops pointer clicks only; this stops the keyboard.
+							disabled={disabled}
+							aria-label={`Reset ${label}`}
+						>
 							<ResetIcon />
 						</button>
 					)}
