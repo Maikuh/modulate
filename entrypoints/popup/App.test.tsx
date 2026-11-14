@@ -1,4 +1,4 @@
-import { render, within, waitFor } from '@testing-library/preact'
+import { fireEvent, render, within, waitFor } from '@testing-library/preact'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
@@ -110,6 +110,70 @@ describe('popup App', () => {
 		await userEvent.click(view.getByRole('button', { name: /reset/i }))
 		await waitFor(() => expect(sendMessage).toHaveBeenCalled())
 		expect(sendMessage.mock.calls[0]![1] as PopupMessage).toEqual({ type: 'RESET' })
+	})
+
+	describe('each control sends its message', () => {
+		const tuned: PlayerState = { ...activeState, semitones: 3, tempo: 1.25 }
+
+		async function setup() {
+			const sendMessage = mockTabs(tuned)
+			const view = renderApp()
+			await view.findByText('Pitch')
+			sendMessage.mockClear()
+			const sent = () => sendMessage.mock.calls.map(([, msg]) => msg as PopupMessage)
+			return { view, sent }
+		}
+
+		it('pitch and tempo sliders', async () => {
+			const { view, sent } = await setup()
+			fireEvent.input(view.getByRole('slider', { name: 'Pitch' }), { target: { value: '-4' } })
+			fireEvent.input(view.getByRole('slider', { name: 'Tempo' }), { target: { value: '0.75' } })
+			await waitFor(() => expect(sent()).toHaveLength(2))
+			expect(sent()).toEqual([
+				{ type: 'SET_SEMITONES', semitones: -4 },
+				{ type: 'SET_TEMPO', tempo: 0.75 },
+			])
+		})
+
+		it('per-control resets and the tempo stepper', async () => {
+			const { view, sent } = await setup()
+			await userEvent.click(view.getByRole('button', { name: 'Reset Pitch' }))
+			await userEvent.click(view.getByRole('button', { name: 'Reset Tempo' }))
+			await userEvent.click(view.getByRole('button', { name: 'Decrease Tempo' }))
+			expect(sent()).toEqual([
+				{ type: 'SET_SEMITONES', semitones: 0 },
+				{ type: 'SET_TEMPO', tempo: 1 },
+				{ type: 'NUDGE_TEMPO', delta: -0.05 },
+			])
+		})
+
+		it('the per-video switch', async () => {
+			const { view, sent } = await setup()
+			await userEvent.click(view.getByLabelText('Enable for this video'))
+			expect(sent()).toEqual([{ type: 'SET_VIDEO_ENABLED', enabled: false }])
+		})
+
+		it('the options button', async () => {
+			const open = vi.spyOn(browser.runtime, 'openOptionsPage').mockResolvedValue(undefined)
+			const { view } = await setup()
+			await userEvent.click(view.getByRole('button', { name: /options/i }))
+			expect(open).toHaveBeenCalledOnce()
+		})
+	})
+
+	// The tab was reloaded or closed under an open popup.
+	it('says contact was lost when the tab stops answering', async () => {
+		vi.spyOn(console, 'debug').mockImplementation(() => {})
+		const sendMessage = mockTabs(activeState)
+		const view = renderApp()
+		await view.findByText('Pitch')
+		sendMessage.mockRejectedValue(new Error(NO_RECEIVER))
+
+		await userEvent.click(view.getByRole('button', { name: 'Increase Pitch' }))
+
+		expect(await view.findByRole('alert')).toHaveTextContent(/lost contact with this tab/i)
+		// Still showing the value the tab last confirmed.
+		expect(view.getByRole('slider', { name: 'Pitch' })).toHaveValue('0')
 	})
 
 	// A YouTube tab opened before an install or update has no content script. Telling
