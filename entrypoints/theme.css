@@ -263,3 +263,20 @@ body {
 [hidden] {
 	display: none !important;
 }
+
+/*
+ * Reduced motion: drop the entrance animations, the loading pulse and the eased
+ * transitions, so everything appears in its final state. Delays go too — the
+ * entrance animations fill backwards, so a delay alone would hold content hidden.
+ */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-delay: 0s !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		transition-delay: 0s !important;
+	}
+}
