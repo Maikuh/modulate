@@ -352,6 +352,14 @@ export default defineContentScript({
 			ctx.setTimeout(() => scheduleApply('location-change'), 0)
 		})
 
+		// Back from the back/forward cache: the page was frozen, not reloaded, so this
+		// script never restarted — but settings may have changed while it was away (a
+		// watcher can't fire into a frozen page), and the browser may have suspended
+		// the audio context. Re-apply, which also re-reports the engine's status.
+		ctx.addEventListener(window, 'pageshow', (event) => {
+			if ((event as PageTransitionEvent).persisted) scheduleApply('bfcache-restore')
+		})
+
 		// Re-apply when settings change elsewhere (another tab, the options page edits
 		// storage directly), so the active tab reflects edits live. Only this tab's
 		// own video matters: a write for any other video changes nothing here.

@@ -451,6 +451,22 @@ describe('content script', () => {
 			cs.stop()
 		})
 
+		it('re-applies when the page comes back from the back/forward cache', async () => {
+			const cs = await startContentScript()
+			await setVideoSetting('vid1', { semitones: 6 }) // changed while it was away
+			await tick()
+			cs.reset()
+
+			window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }))
+			await tick()
+			expect(cs.applies()).toHaveLength(0) // a first load: startup applied already
+
+			window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }))
+			await tick()
+			expect(cs.applies()).toEqual([expect.objectContaining({ semitones: 6 })])
+			cs.stop()
+		})
+
 		// The options page edits storage directly; this is its only path to playback.
 		it('re-applies when storage changes elsewhere', async () => {
 			await setVideoSetting('vid1', { semitones: 3 })
