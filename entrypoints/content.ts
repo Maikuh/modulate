@@ -290,13 +290,12 @@ export default defineContentScript({
 				}
 			}
 
-			// GET_STATE is a pure read fired on popup mount — never touch the audio
-			// graph, or the response would block on graph build / context resume.
-			if (msg.type !== 'GET_STATE') {
-				// A mutating message changed the desired state: (re)apply. Fire-and-forget so
-				// the popup's response isn't held up by graph build or context resume.
-				scheduleApply(msg.type)
-			}
+			// No apply here, for any message. Every change lands in storage, and the
+			// storage watchers below re-apply on it — the one path for every writer
+			// (popup, shortcuts, the options page, other tabs). Applying here as well ran
+			// each change twice; a write that changed nothing applies nothing. And
+			// GET_STATE, the popup's mount read, never touches the audio graph, or the
+			// reply would wait on a graph build or a context resume.
 			const state = await getState()
 			if (shortcut) showToast(shortcutNotice(msg.type, state))
 			return state

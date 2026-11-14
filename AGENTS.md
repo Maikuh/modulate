@@ -61,7 +61,7 @@ The content/page hop runs over the injected `<script>` element: `APPLY_EVENT` / 
 
 Routine "nobody is listening" messaging failures go through `logSendFailure` (debug level); anything else warns.
 
-`GET_STATE` is a pure read fired on popup mount and **must never touch the audio graph** — otherwise the popup response blocks on graph build / context resume. Only mutating messages call `apply()` (fire-and-forget).
+`GET_STATE` is a pure read fired on popup mount and **must never touch the audio graph** — otherwise the popup response blocks on graph build / context resume. No message handler calls `apply()` at all: a mutating message only writes storage, and the **storage watchers are the one path from a change to the page** — for every writer (popup, shortcuts, options page, other tabs). Applying from the handler too ran each change twice; a write that changes nothing applies nothing.
 
 ## Audio engine invariants (`lib/audioEngine.ts`)
 

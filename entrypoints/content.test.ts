@@ -237,6 +237,36 @@ describe('content script', () => {
 		cs.stop()
 	})
 
+	// The storage watcher is the one path from a change to the page: the handler
+	// applying as well ran every change twice.
+	it('applies a change once, and badges it once', async () => {
+		const cs = await startContentScript()
+		cs.reset()
+
+		await send({ type: 'SET_SEMITONES', semitones: 5 })
+		await send({ type: 'NUDGE_TEMPO', delta: TEMPO_STEP })
+		await send({ type: 'SET_GLOBAL_ENABLED', enabled: false })
+		await tick()
+
+		expect(cs.applies()).toEqual([
+			expect.objectContaining({ semitones: 5, tempo: 1 }),
+			expect.objectContaining({ semitones: 5, tempo: 1.05 }),
+			expect.objectContaining({ semitones: 0, tempo: 1 }),
+		])
+		expect(browser.runtime.sendMessage).toHaveBeenCalledTimes(3)
+		cs.stop()
+	})
+
+	it('applies nothing for a change that changes nothing', async () => {
+		const cs = await startContentScript()
+		cs.reset()
+
+		await send({ type: 'RESET' }) // no entry to reset
+
+		expect(cs.applies()).toHaveLength(0)
+		cs.stop()
+	})
+
 	describe('message handling', () => {
 		it('clamps a set beyond the range before persisting', async () => {
 			const cs = await startContentScript()
