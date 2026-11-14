@@ -34,9 +34,9 @@ export const INVALIDATION_POLL_MS = 1000
 export default defineContentScript({
 	matches: ['*://*.youtube.com/*'],
 	main(ctx) {
-		// The worklet URL must be resolved here — the main-world script has no
-		// access to extension APIs like `browser.runtime.getURL`.
-		const processorUrl = browser.runtime.getURL('/signalsmith-processor.js')
+		// Only for page scripts from 1.4 and earlier (see `ApplyMessage`); the current
+		// one finds the worklet beside its own <script src>.
+		const legacyProcessorUrl = browser.runtime.getURL('/signalsmith-processor.js')
 
 		// Inject the audio engine into the page's MAIN world. It can't live in this
 		// sandbox: Firefox throws DataCloneError when an AudioWorkletNode serializes
@@ -154,10 +154,10 @@ export default defineContentScript({
 
 		/** Forward settings to the main-world engine. */
 		function postApply(setting: ResolvedSetting): void {
-			const msg: ApplyMessage = {
+			const msg: ApplyMessage & { processorUrl: string } = {
 				source: 'modulate',
 				type: 'apply',
-				processorUrl,
+				processorUrl: legacyProcessorUrl,
 				semitones: setting.semitones,
 				tempo: setting.tempo,
 			}

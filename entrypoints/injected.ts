@@ -46,6 +46,16 @@ export default defineUnlistedScript(() => {
 	// context on every trigger trying — so later copies hand their channel to it and
 	// stand down (the old content script stood its engine down on invalidation, and
 	// the new one's messages then reach the engine that owns the element).
+	// The worklet ships beside this file. Resolved from our own <script src> rather
+	// than taken from a message: anything in the MAIN world can post on the channel,
+	// and this URL goes straight to `audioWorklet.addModule`.
+	const scriptUrl = (channel as HTMLScriptElement).src
+	if (!/^(chrome|moz)-extension:\/\//.test(scriptUrl)) {
+		console.error('[modulate] not loaded from the extension; cannot find the audio worklet')
+		return
+	}
+	const processorUrl = new URL('signalsmith-processor.js', scriptUrl).href
+
 	const page = window as Window & { [INSTANCE_KEY]?: Adopt }
 	const running = page[INSTANCE_KEY]
 	if (typeof running === 'function') {
@@ -262,7 +272,7 @@ export default defineUnlistedScript(() => {
 		if (needsGraph && !audioEngine.hasGraph && blocked) return waitNatively(el, msg)
 		if (needsGraph) {
 			try {
-				await audioEngine.ensureGraph(el, msg.processorUrl)
+				await audioEngine.ensureGraph(el, processorUrl)
 			} catch (err) {
 				// The first build asks the browser whether audio may start, and captures
 				// nothing when it may not. That can't be predicted from here: sticky

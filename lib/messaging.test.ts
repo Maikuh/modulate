@@ -6,7 +6,6 @@ import { MAX_SEMITONES, MAX_TEMPO, MIN_TEMPO } from '@/lib/settings'
 const valid: ApplyMessage = {
 	source: 'modulate',
 	type: 'apply',
-	processorUrl: 'moz-extension://abc/signalsmith-processor.js',
 	semitones: 3,
 	tempo: 1.25,
 }
@@ -37,8 +36,12 @@ describe('parseApplyMessage', () => {
 		expect(warn).toHaveBeenCalledWith(expect.stringContaining('tempo'))
 	})
 
-	it('rejects a processorUrl that is not an extension URL', () => {
-		expect(parse({ ...valid, processorUrl: 'https://evil.example/w.js' })).toBeNull()
+	// The page script finds the worklet itself; a URL on the wire (sent for 1.4-era
+	// page scripts, or forged) must not survive parsing to reach `addModule`.
+	it('drops any processorUrl it is sent', () => {
+		const parsed = parse({ ...valid, processorUrl: 'https://evil.example/w.js' })
+		expect(parsed).toEqual(valid)
+		expect(parsed).not.toHaveProperty('processorUrl')
 	})
 
 	// Any MAIN-world script can post here, and an out-of-range value reaches

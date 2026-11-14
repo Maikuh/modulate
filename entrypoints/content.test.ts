@@ -195,7 +195,9 @@ describe('content script', () => {
 		cs.stop()
 	})
 
-	it('carries the resolved settings and the worklet URL', async () => {
+	// The URL is for page scripts from 1.4 and earlier, still running after a
+	// Firefox update; they reject an apply without it.
+	it('carries the resolved settings, and the worklet URL for older page scripts', async () => {
 		await setVideoSetting('vid1', { semitones: -2, tempo: 1.5 })
 		const cs = await startContentScript()
 

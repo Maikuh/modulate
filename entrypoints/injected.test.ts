@@ -39,13 +39,20 @@ function audioAllowed(allowed: boolean): void {
 		engine.hasElement = true
 	})
 }
+const SCRIPT_URL = 'chrome-extension://abc123/injected.js'
 const PROCESSOR_URL = 'chrome-extension://abc123/signalsmith-processor.js'
+
+/** A `<script>` loaded from the extension, as the content script injects it. */
+function extensionScript(src = SCRIPT_URL): HTMLScriptElement {
+	const script = document.createElement('script')
+	script.src = src
+	return script
+}
 
 function message(overrides: Partial<ApplyMessage> = {}): ApplyMessage {
 	return {
 		source: 'modulate',
 		type: 'apply',
-		processorUrl: PROCESSOR_URL,
 		semitones: 0,
 		tempo: 1,
 		...overrides,
@@ -91,7 +98,7 @@ async function tick(times = 6) {
  */
 let teardown: Array<() => void> = []
 let recording: Array<{ mockRestore(): void }> | null = null
-function start(script: HTMLElement = document.createElement('script')): HTMLElement {
+function start(script: HTMLElement = extensionScript()): HTMLElement {
 	if (!recording) {
 		recording = [window, document].map((target: EventTarget) => {
 			const added = target.addEventListener.bind(target)
@@ -167,15 +174,12 @@ describe('injected script — payload validation', () => {
 		expect(engine.ensureGraph).not.toHaveBeenCalled()
 	})
 
-	// processorUrl is handed to audioWorklet.addModule. The MAIN world is shared
-	// with page scripts, so anything can post here — an off-origin URL would load
-	// third-party code into the page's worklet scope.
-	it('rejects a processorUrl that is not an extension URL', async () => {
-		await post(message({ semitones: 3, processorUrl: 'https://evil.example/worklet.js' }))
-		expect(engine.ensureGraph).not.toHaveBeenCalled()
-
-		await post(message({ semitones: 3, processorUrl: PROCESSOR_URL }))
-		expect(engine.ensureGraph).toHaveBeenCalledOnce()
+	// The worklet URL goes straight to audioWorklet.addModule. The MAIN world is
+	// shared with page scripts, so anything can post here: the URL comes from where
+	// this script was loaded, never from a message.
+	it('loads the worklet from beside its own script, whatever a message says', async () => {
+		await post({ ...message({ semitones: 3 }), processorUrl: 'https://evil.example/worklet.js' })
+		expect(engine.ensureGraph).toHaveBeenCalledWith(expect.anything(), PROCESSOR_URL)
 	})
 
 	it('rejects non-finite and non-numeric parameters', async () => {
@@ -343,7 +347,7 @@ describe('injected script — playing reports', () => {
 
 	it('tells a newly adopted channel what is already playing', () => {
 		current = { video_id: 'a', title: 'A' }
-		const script = document.createElement('script')
+		const script = extensionScript()
 		const seen = collectPlaying(script)
 		start(script)
 		expect(seen).toEqual([{ videoId: 'a', title: 'A' }])
@@ -735,6 +739,14 @@ describe('injected script — pagehide', () => {
 })
 
 describe('injected script — channel', () => {
+	it('refuses to run from a script the extension did not load', () => {
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+		mountVideo()
+		start(extensionScript('https://www.youtube.com/s/injected.js'))
+		expect(error).toHaveBeenCalledWith(expect.stringContaining('not loaded from the extension'))
+		expect(Reflect.get(window, INSTANCE_KEY)).toBeUndefined()
+	})
+
 	// window.postMessage is readable and forgeable by every script in the page.
 	it('ignores apply messages posted page-wide', async () => {
 		mountVideo()

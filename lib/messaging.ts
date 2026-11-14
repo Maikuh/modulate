@@ -86,14 +86,17 @@ export const PLAYING_EVENT = 'modulate:playing'
  * `detail` of an `APPLY_EVENT`, serialized to JSON: a string crosses the
  * content/page membrane in every browser, an object arrives as `null` in Firefox
  * without `cloneInto` and in Chrome's isolated worlds.
- * Carries the effective pitch/tempo (already resolved against the toggles) and
- * the worklet's URL.
+ * Carries the effective pitch/tempo, already resolved against the toggles.
+ *
+ * The worklet's URL is not part of it: the page script resolves that beside its
+ * own `<script src>`, so no message can point `audioWorklet.addModule` anywhere.
+ * The content script still sends `processorUrl` on the wire, for page scripts
+ * from 1.4 and earlier, which require it and keep running after a Firefox update
+ * hands their page to the new content script; this parser ignores it.
  */
 export type ApplyMessage = {
 	source: 'modulate'
 	type: 'apply'
-	/** Extension URL of the worklet processor (main world can't call `getURL`). */
-	processorUrl: string
 } & ResolvedSetting
 
 /**
@@ -104,8 +107,6 @@ export type ApplyMessage = {
  * with YouTube's own scripts and any other extension injecting there, and the
  * channel element is briefly in the DOM — so a well-formed message can come from
  * something that isn't our content script.
- * `processorUrl` is the field that matters most — it goes straight to
- * `audioWorklet.addModule`, so it must be an extension URL and nothing else.
  *
  * Numbers are clamped onto the storage ranges as well as type-checked: an
  * out-of-range value (`tempo: 100`) would make the engine's restricted-float
@@ -129,15 +130,12 @@ export function parseApplyMessage(raw: string): ApplyMessage | null {
 		console.warn(`[modulate] ignoring apply message with invalid ${field}`)
 		return null
 	}
-	if (typeof m.processorUrl !== 'string' || !/^(chrome|moz)-extension:\/\//.test(m.processorUrl))
-		return reject('processorUrl')
 	if (!isFiniteNumber(m.semitones)) return reject('semitones')
 	if (!isFiniteNumber(m.tempo)) return reject('tempo')
 
 	return {
 		source: 'modulate',
 		type: 'apply',
-		processorUrl: m.processorUrl,
 		semitones: clampSemitones(m.semitones),
 		tempo: clampTempo(m.tempo),
 	}
