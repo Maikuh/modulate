@@ -13,7 +13,7 @@ import {
 import { TEMPO_STEP } from '@/lib/settings'
 import { globalEnabled, setVideoSetting, getRawVideoSetting } from '@/lib/storage'
 
-import content from './content'
+import content, { INVALIDATION_POLL_MS } from './content'
 
 const WATCH_URL = 'https://www.youtube.com/watch?v=vid1'
 
@@ -485,6 +485,47 @@ describe('content script', () => {
 			await tick()
 			expect(cs.applies()).toHaveLength(0)
 			cs.stop()
+		})
+
+		// Nothing tells a content script that its extension went away; WXT only finds
+		// out when something checks. Without a check the video stays transposed until
+		// the next navigation. (happy-dom has no Navigation API, so WXT's URL poll
+		// would notice here too; in browsers with it, only our own poll does.)
+		it('notices on its own that the extension went away', async () => {
+			await setVideoSetting('vid1', { semitones: 3 })
+			vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+			const runtime = browser.runtime as { id?: string }
+			const id = runtime.id
+			try {
+				const cs = await startContentScript()
+				cs.reset()
+
+				runtime.id = undefined // what an orphaned script sees
+				vi.advanceTimersByTime(INVALIDATION_POLL_MS)
+				await tick()
+
+				expect(cs.ctx.isValid).toBe(false)
+				expect(cs.applies()).toEqual([expect.objectContaining({ semitones: 0, tempo: 1 })])
+				cs.stop()
+			} finally {
+				// Not restored by `fakeBrowser.reset()`.
+				runtime.id = id
+				vi.useRealTimers()
+			}
+		})
+
+		it('stands the engine down even if removing a watcher throws', async () => {
+			const cs = await startContentScript()
+			cs.reset()
+			vi.spyOn(browser.storage.onChanged, 'removeListener').mockImplementation(() => {
+				throw new Error('Extension context invalidated.')
+			})
+			vi.spyOn(console, 'debug').mockImplementation(() => {})
+
+			cs.ctx.notifyInvalidated()
+			await tick()
+
+			expect(cs.applies().at(-1)).toMatchObject({ semitones: 0, tempo: 1 })
 		})
 	})
 

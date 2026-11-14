@@ -21,6 +21,9 @@ import {
 } from '@/lib/storage'
 import { getVideoId, getVideoTitle } from '@/lib/youtube'
 
+/** How often to check whether the extension was disabled, updated or removed. */
+export const INVALIDATION_POLL_MS = 1000
+
 export default defineContentScript({
 	matches: ['*://*.youtube.com/*'],
 	main(ctx) {
@@ -304,13 +307,28 @@ export default defineContentScript({
 			storage.watch('local:globalEnabled', () => scheduleApply('globalEnabled')),
 		]
 		ctx.onInvalidated(() => {
-			unwatchers.forEach((off) => off())
 			// The page-realm engine outlives this script: disabling, updating or
 			// uninstalling the extension invalidates us, but the worklet module is already
 			// loaded and keeps processing. Stand it down so the video doesn't stay
-			// transposed (and time-stretched) until a reload.
+			// transposed (and time-stretched) until a reload. First, before anything that
+			// touches the extension APIs this context just lost, which may throw.
 			postApply(NO_OP)
+			for (const off of unwatchers) {
+				try {
+					off()
+				} catch (err) {
+					console.debug('[modulate] could not remove a storage watcher', err)
+				}
+			}
 		})
+
+		// WXT notices invalidation only when something reads `ctx.isValid` (which
+		// checks `browser.runtime.id`), or when a newer copy of this script starts. On
+		// the Navigation API path nothing polls, so after the extension is disabled
+		// the video would stay transposed until the next navigation. `ctx.setInterval`
+		// reads `isValid` before every tick, which is the whole check: cheap, and it
+		// wakes nothing in the background.
+		ctx.setInterval(() => {}, INVALIDATION_POLL_MS)
 
 		scheduleApply('startup')
 	},
