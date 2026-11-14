@@ -133,8 +133,26 @@ export default defineContentScript({
 				videoId ? getRawVideoSetting(videoId) : Promise.resolve(undefined),
 			])
 			const resolved = resolveSetting(global, video)
+			const badge: NonNullable<typeof lastBadge> = {
+				type: 'MODULATE_BADGE',
+				onVideo: videoId != null,
+				semitones: resolved.semitones,
+				tempo: resolved.tempo,
+			}
 
-			await injected // Ensure the page-world listener is registered.
+			try {
+				await injected // Ensure the page-world listener is registered.
+			} catch (err) {
+				// The engine never loaded, so nothing will apply. The `error` status was
+				// set when the injection failed — but with no badge sent yet, it had
+				// nothing to annotate: send this one, so the toolbar flags the failure
+				// instead of staying blank.
+				if (ctx.isValid && seq === applySeq) {
+					lastBadge = badge
+					sendBadge()
+				}
+				throw err
+			}
 			// Superseded: a later apply read newer storage and will post. Posting this one
 			// after it would leave the page applying stale settings.
 			if (!ctx.isValid || seq !== applySeq) return
@@ -142,12 +160,7 @@ export default defineContentScript({
 			postApply(resolved)
 
 			// Tell the background to render the toolbar badge for this tab.
-			lastBadge = {
-				type: 'MODULATE_BADGE',
-				onVideo: videoId != null,
-				semitones: resolved.semitones,
-				tempo: resolved.tempo,
-			}
+			lastBadge = badge
 			sendBadge()
 		}
 

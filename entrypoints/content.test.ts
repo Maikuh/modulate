@@ -37,7 +37,7 @@ function setUrl(url: string): void {
  * element for the injection: `main` only sets `.src`, adds listeners, appends
  * and removes, none of which need script semantics.
  */
-async function startContentScript() {
+async function startContentScript({ injection = 'load' }: { injection?: 'load' | 'error' } = {}) {
 	const ctx = new ContentScriptContext('test')
 	const posted: string[] = []
 	// Anything on the page-wide channel would be readable by every page script.
@@ -68,7 +68,7 @@ async function startContentScript() {
 		const detail = (e as CustomEvent<unknown>).detail
 		posted.push(detail as string)
 	})
-	channel.dispatchEvent(new Event('load'))
+	channel.dispatchEvent(new Event(injection))
 
 	await tick()
 	return {
@@ -520,6 +520,20 @@ describe('content script', () => {
 				audio: 'waiting-for-gesture',
 				audioSeq: 1,
 			})
+			cs.stop()
+		})
+
+		// The failure is reported as a status, but the status only reaches the
+		// toolbar riding on a badge — and no apply ever got far enough to send one.
+		it('flags an engine that never loaded', async () => {
+			await setVideoSetting('vid1', { semitones: 3 })
+			vi.spyOn(console, 'error').mockImplementation(() => {})
+			const cs = await startContentScript({ injection: 'error' })
+
+			expect(browser.runtime.sendMessage).toHaveBeenLastCalledWith(
+				expect.objectContaining({ onVideo: true, semitones: 3, status: 'error' }),
+			)
+			expect(cs.applies()).toHaveLength(0)
 			cs.stop()
 		})
 
